@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Color Roll</title>
+<style>
+  :root { --gap: 14px; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    background: #0b0b0c; color: #e8e8ea;
+    display: grid; place-items: start center; min-height: 100dvh;
+  }
+  .wrap { width: min(840px, 92vw); }
+  h1 { margin: 0 0 10px 0; font-size: 22px; font-weight: 700; letter-spacing: .2px; }
+  .meta { opacity: .75; font-size: 13px; margin-bottom: 18px; }
+  .row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--gap);
+  }
+  .swatch {
+    border-radius: 16px;
+    padding: 18px;
+    aspect-ratio: 4/5;
+    display: flex; align-items: end; justify-content: space-between;
+    box-shadow: 0 3px 14px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.08);
+  }
+  .tag {
+    font-size: 13px; font-weight: 700; padding: 6px 10px; border-radius: 10px;
+    background: rgba(0,0,0,.25);
+  }
+  .hex { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .footer { margin-top: 16px; font-size: 12px; opacity: .7 }
+  @media (max-width: 680px) {
+    .row { grid-template-columns: 1fr 1fr; }
+    .swatch { aspect-ratio: 5/3; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap" aria-label="a block of five horizontal color swatches in #cc66bd, #bf7340, #5f9933, #40bf9d, and #6668cc">
+    <h1>🎲 Rolled Palette</h1>
+    <div class="meta">hueSeed: <b>94</b> · hueRange: <b>10</b> · satSeed: <b>5</b> · litSeed: <b>33</b></div>
+    <div class="row">
+      
+        <div class="swatch" style="background:#cc66bd; color:black">
+          <span class="tag">#1</span>
+          <span class="hex">#cc66bd</span>
+        </div>
+      
+        <div class="swatch" style="background:#bf7340; color:black">
+          <span class="tag">#2</span>
+          <span class="hex">#bf7340</span>
+        </div>
+      
+        <div class="swatch" style="background:#5f9933; color:white">
+          <span class="tag">#3</span>
+          <span class="hex">#5f9933</span>
+        </div>
+      
+        <div class="swatch" style="background:#40bf9d; color:black">
+          <span class="tag">#4</span>
+          <span class="hex">#40bf9d</span>
+        </div>
+      
+        <div class="swatch" style="background:#6668cc; color:white">
+          <span class="tag">#5</span>
+          <span class="hex">#6668cc</span>
+        </div>
+      
+    </div>
+    <div class="footer">Text color per swatch is chosen for contrast: black/white.</div>
+  </div>
+</body>
+</html>
