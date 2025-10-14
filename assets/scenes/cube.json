@@ -1,0 +1,33 @@
+{
+    "camera": {
+      "eye":   [0, 0, 6],
+      "target":[0, 0, 0],
+      "up":    [0, 1, 0],
+      "fovDeg": 45,
+      "near": 0.1,
+      "far":  100
+    },
+    "objects": [
+      {
+        "name": "cube",
+        "transform": {
+          "translate": [0, 0, 0],
+          "rotateDeg": [0, 0, 0],
+          "scale":     [1, 1, 1]
+        },
+        "material": {
+          "type": "tesselation",
+          "scheme": "gaussian",
+          "bands": 7,
+          "sigma": 8,
+          "scale": 4,
+          "bandGamma": 1.0,
+          "dither": 0.02,
+          "wrap": "repeat",
+          "paletteMode": "triadic",
+          "paletteSize": 5
+        }
+      }
+    ]
+  }
+  

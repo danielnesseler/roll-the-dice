@@ -25,6 +25,7 @@
 <body>
   <header>
     <button id="reload">Reload OBJ</button>
+    <input type="file" id="fileUpload" accept=".obj" style="margin-right: 10px;">
     <label>Bands <input id="bands" type="range" min="3" max="24" value="7" /></label>
     <label>Noise Scale <input id="scale" type="range" min="0.5" max="8" step="0.01" value="2.5" /></label>
     <label>Octaves <input id="octaves" type="range" min="1" max="8" value="4" /></label>
@@ -349,6 +350,127 @@ const hueEl   = document.getElementById('hue');
 document.getElementById('reload').addEventListener('click', loadModel);
 hueEl.addEventListener('input', ()=> setPalette(Number(hueEl.value)));
 
+// ------------------ file upload functionality ------------------
+function centerAndScaleVertices(vertices) {
+  if (vertices.length === 0) return [];
+  
+  // Find bounding box
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  
+  for (const [x, y, z] of vertices) {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+  }
+  
+  // Center
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const centerZ = (minZ + maxZ) / 2;
+  
+  // Scale to fit in a 2-unit cube
+  const sizeX = maxX - minX;
+  const sizeY = maxY - minY;
+  const sizeZ = maxZ - minZ;
+  const maxSize = Math.max(sizeX, sizeY, sizeZ);
+  const scale = maxSize > 0 ? 2 / maxSize : 1;
+  
+  console.log(`Model bounds: [${minX.toFixed(2)}, ${maxX.toFixed(2)}] x [${minY.toFixed(2)}, ${maxY.toFixed(2)}] x [${minZ.toFixed(2)}, ${maxZ.toFixed(2)}]`);
+  console.log(`Centering at [${centerX.toFixed(2)}, ${centerY.toFixed(2)}, ${centerZ.toFixed(2)}], scale: ${scale.toFixed(3)}`);
+  
+  return vertices.map(([x, y, z]) => [
+    (x - centerX) * scale,
+    (y - centerY) * scale,
+    (z - centerZ) * scale
+  ]);
+}
+
+async function parseUploadedOBJ(text) {
+  const P = [[0,0,0]], N = [[0,0,1]];
+  const faces = [];
+  
+  console.log('Parsing uploaded OBJ file...');
+  
+  for (const line of text.split(/\r?\n/)) {
+    const s = line.trim();
+    if (!s || s.startsWith('#')) continue;
+    const parts = s.split(/\s+/);
+    
+    if (parts[0] === 'v') {
+      P.push([+parts[1], +parts[2], +parts[3]]);
+    } else if (parts[0] === 'vn') {
+      N.push([+parts[1], +parts[2], +parts[3]]);
+    } else if (parts[0] === 'f') {
+      const vs = parts.slice(1).map(p => {
+        const seg = p.split('/');
+        const vi = seg.length > 0 && seg[0] !== '' ? parseInt(seg[0], 10) : 0;
+        const ni = seg.length > 2 && seg[2] !== '' ? parseInt(seg[2], 10) : 0;
+        return [vi, ni];
+      });
+      // Triangulate faces
+      for (let i = 1; i < vs.length - 1; i++) {
+        faces.push([vs[0], vs[i], vs[i + 1]]);
+      }
+    }
+  }
+  
+  console.log(`Found ${P.length-1} vertices, ${faces.length} faces`);
+  
+  if (faces.length === 0) {
+    throw new Error('OBJ file contains no faces');
+  }
+  
+  // Center and scale the model
+  const vertices = P.slice(1); // Remove the dummy [0,0,0] vertex
+  const centered = centerAndScaleVertices(vertices);
+  
+  // Build flat arrays
+  const pos = [], nrm = [];
+  for (const tri of faces) {
+    for (const [vi, ni] of tri) {
+      const v = vi > 0 && vi < centered.length + 1 ? centered[vi - 1] : [0, 0, 0];
+      const nn = ni > 0 && ni < N.length ? N[ni] : [0, 0, 1];
+      pos.push(v[0], v[1], v[2]);
+      nrm.push(nn[0], nn[1], nn[2]);
+    }
+  }
+  
+  console.log(`Generated ${pos.length/9} triangles for rendering`);
+  
+  return { pos: new Float32Array(pos), nrm: new Float32Array(nrm) };
+}
+
+document.getElementById('fileUpload').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  console.log(`Starting upload of: ${file.name}`);
+  statusEl.textContent = `Loading ${file.name}...`;
+  overlay.hidden = true;
+
+  try {
+    const text = await file.text();
+    console.log(`File read successfully, size: ${text.length} characters`);
+    
+    const uploadedGeo = await parseUploadedOBJ(text);
+    console.log(`Successfully parsed OBJ: ${uploadedGeo.pos.length/9} triangles`);
+    
+    // Replace current geometry
+    geo = uploadedGeo;
+    uploadGeometryFlat(geo);
+    
+    statusEl.textContent = `Uploaded: ${file.name} (${geo.pos.length/9} triangles)`;
+    console.log('File upload complete and rendering updated');
+    
+  } catch (err) {
+    console.error('File upload failed:', err);
+    statusEl.textContent = `Upload failed: ${err.message}`;
+    overlay.hidden = false;
+    overlay.textContent = `Upload failed: ${err.message}\nUsing current geometry.`;
+  }
+});
+
 // ------------------ load model (with fallback) ------------------
 let geo = icosphereFlat(2);
 uploadGeometryFlat(geo);
@@ -374,6 +496,46 @@ loadModel();
 // ------------------ render loop ------------------
 gl.enable(gl.DEPTH_TEST);
 
+// Add pan controls
+let panX = 0, panY = 0;
+let isDragging = false;
+let lastMouseX = 0, lastMouseY = 0;
+
+// Mouse event listeners for panning
+canvas.addEventListener('mousedown', (event) => {
+  isDragging = true;
+  lastMouseX = event.clientX;
+  lastMouseY = event.clientY;
+  canvas.style.cursor = 'grabbing';
+});
+
+canvas.addEventListener('mousemove', (event) => {
+  if (!isDragging) return;
+  
+  const deltaX = event.clientX - lastMouseX;
+  const deltaY = event.clientY - lastMouseY;
+  
+  // Adjust sensitivity (smaller values = finer control)
+  panX += deltaX * 0.01;
+  panY -= deltaY * 0.01; // Invert Y for natural movement
+  
+  lastMouseX = event.clientX;
+  lastMouseY = event.clientY;
+});
+
+canvas.addEventListener('mouseup', () => {
+  isDragging = false;
+  canvas.style.cursor = 'grab';
+});
+
+canvas.addEventListener('mouseleave', () => {
+  isDragging = false;
+  canvas.style.cursor = 'default';
+});
+
+// Set initial cursor
+canvas.style.cursor = 'grab';
+
 function frame(tMs){
   const t = tMs*0.001;
 
@@ -386,7 +548,9 @@ function frame(tMs){
   const aspect = (canvas.width / canvas.height);
   let model = mat4Identity();
   if (spinEl.checked) model = mat4Mul(mat4RotateY(t*0.7), mat4RotateX(t*0.3));
-  const view = mat4Translate(0, 0, -3.6);
+  
+  // Apply panning to the view matrix
+  const view = mat4Translate(panX, panY, -3.6);
   const proj = mat4Perspective(Math.PI/3, aspect, 0.1, 100);
 
   gl.uniformMatrix4fv(loc.u_model, false, model);
@@ -399,7 +563,7 @@ function frame(tMs){
   const vertCount = geo.pos.length / 3;
   gl.drawArrays(gl.TRIANGLES, 0, vertCount);
 
-  statusEl.textContent = `verts:${vertCount} | bands:${bandsEl.value} scale:${scaleEl.value} oct:${octEl.value} hue:${hueEl.value}°`;
+  statusEl.textContent = `verts:${vertCount} | pan:[${panX.toFixed(2)},${panY.toFixed(2)}] | bands:${bandsEl.value} scale:${scaleEl.value} oct:${octEl.value} hue:${hueEl.value}°`;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
