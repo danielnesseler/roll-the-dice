@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>diag: spinning cube (no deps)</title>
+  <style>body{margin:0;background:#111;display:grid;place-items:center;height:100vh}canvas{width:900px;height:600px;box-shadow:0 10px 40px #000a;border-radius:12px}</style>
+</head>
+<body>
+  <canvas id="c" width="900" height="600"></canvas>
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+
+    // simple cube
+    const V = [
+      [-1,-1,-1],[ 1,-1,-1],[ 1, 1,-1],[-1, 1,-1],
+      [-1,-1, 1],[ 1,-1, 1],[ 1, 1, 1],[-1, 1, 1],
+    ];
+    const E = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+
+    function proj(x,y,z, w=canvas.width, h=canvas.height) {
+      const f = 500/(z+4); // cheap perspective
+      return [ w/2 + x*f, h/2 - y*f ];
+    }
+
+    function rotY([x,y,z], a){
+      const c=Math.cos(a), s=Math.sin(a);
+      return [ c*x+s*z, y, -s*x+c*z ];
+    }
+    function rotX([x,y,z], a){
+      const c=Math.cos(a), s=Math.sin(a);
+      return [ x, c*y - s*z, s*y + c*z ];
+    }
+
+    function draw(t){
+      ctx.fillStyle='#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      const a = t*0.001;
+      const P = V.map(v=>proj(...rotX(rotY(v, a*0.9), a*0.5)));
+
+      ctx.strokeStyle='#fff'; ctx.lineWidth=1; ctx.beginPath();
+      for(const [i,j] of E){ const p=P[i], q=P[j]; ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); }
+      ctx.stroke();
+
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>

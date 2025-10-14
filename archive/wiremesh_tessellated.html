@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Tessellated OBJ Wiremesh (no libs)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font-family: system-ui, sans-serif; display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  header { padding: 10px 14px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: center; border-bottom: 1px solid #0003; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  input[type="range"] { width: 120px; }
+  #drop { margin-left: auto; opacity: .8; }
+  main { position: relative; background: #111; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #hint { position: absolute; left: 10px; bottom: 10px; color: #fff9; font: 12px/1.2 system-ui, sans-serif; user-select: none; }
+  details { margin-left: auto; }
+  .swatches { display: inline-flex; gap: 4px; align-items: center; }
+  .swatch { width: 16px; height: 16px; border-radius: 3px; border: 1px solid #0003; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="row">
+      <input id="file" type="file" accept=".obj" />
+      <button id="reset">Reset View</button>
+      <span id="drop">Drag & drop an .obj anywhere</span>
+    </div>
+
+    <div class="row">
+      <label>Wireframe
+        <input id="wire" type="checkbox" checked>
+      </label>
+      <label>Width
+        <input id="linewidth" type="range" min="0.5" max="4" step="0.5" value="1.5">
+        <span id="lwVal">1.5</span>px
+      </label>
+      <label>Color
+        <input id="linecolor" type="color" value="#00d5ff">
+      </label>
+      <label>Perspective
+        <input id="persp" type="checkbox" checked>
+      </label>
+      <label>FOV
+        <input id="fov" type="range" min="20" max="110" value="60">
+        <span id="fovVal">60</span>°
+      </label>
+      <label>Model Scale
+        <input id="scale" type="range" min="0.2" max="4" step="0.01" value="1">
+        <span id="scaleVal">1.00</span>x
+      </label>
+    </div>
+
+    <div class="row">
+      <button id="regenTex">Regenerate Texture</button>
+      <label>σ (blur)
+        <input id="sigma" type="range" min="1" max="18" value="9">
+        <span id="sigmaVal">9</span>
+      </label>
+      <label>Bands
+        <input id="bands" type="range" min="3" max="16" value="6">
+        <span id="bandsVal">6</span>
+      </label>
+      <label>Texture Size
+        <input id="texSize" type="range" min="256" max="2048" step="256" value="1024">
+        <span id="texSizeVal">1024</span>
+      </label>
+      <label>UV Scale
+        <input id="uvScale" type="range" min="0.25" max="8" step="0.25" value="2">
+        <span id="uvScaleVal">2.00</span>x
+      </label>
+      <span class="swatches" id="swatches"></span>
+    </div>
+  </header>
+
+  <main>
+    <canvas id="c"></canvas>
+    <div id="hint">LMB: orbit · Wheel: zoom · Shift+LMB: pan</div>
+  </main>
+
+<script type="module">
+/* ========================= utils ========================= */
+const DPR = Math.max(1, window.devicePixelRatio || 1);
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+
+/* ========================= OBJ parsing =========================
+   Supports:
+   - v x y z
+   - vt u v (w ignored)
+   - f v[/vt][/vn] ...
+   Triangulates n-gons with a triangle fan.
+=============================================================== */
+function parseOBJ(text) {
+  const verts = [];
+  const uvs = [];
+  const faces = []; // { vIdx:[...], vtIdx:[...] or null }
+
+  const lines = text.split(/\r?\n/);
+  for (let line of lines) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const parts = line.split(/\s+/);
+    const tag = parts[0];
+
+    if (tag === 'v' && parts.length >= 4) {
+      verts.push([+parts[1], +parts[2], +parts[3]]);
+    } else if (tag === 'vt' && parts.length >= 3) {
+      uvs.push([+parts[1], +parts[2]]);
+    } else if (tag === 'f' && parts.length >= 4) {
+      const vIdx=[], vtIdx=[];
+      for (const tok of parts.slice(1)) {
+        const [vS, vtS] = tok.split('/');
+        let v = parseInt(vS,10);
+        if (Number.isNaN(v) || v===0) continue;
+        if (v<0) v = verts.length + v + 1;
+        vIdx.push(v-1);
+
+        if (vtS && vtS.length) {
+          let t = parseInt(vtS,10);
+          if (t<0) t = uvs.length + t + 1;
+          vtIdx.push((t-1));
+        } else {
+          vtIdx.push(null);
+        }
+      }
+      if (vIdx.length >= 3) faces.push({ vIdx, vtIdx: vtIdx.every(i=>i===null) ? null : vtIdx });
+    }
+  }
+
+  // center & scale verts to fit
+  if (verts.length) {
+    let min=[Infinity,Infinity,Infinity], max=[-Infinity,-Infinity,-Infinity];
+    for (const v of verts) for (let k=0;k<3;k++) { min[k]=Math.min(min[k],v[k]); max[k]=Math.max(max[k],v[k]); }
+    const c=[(min[0]+max[0])/2,(min[1]+max[1])/2,(min[2]+max[2])/2];
+    const diag=Math.hypot(max[0]-min[0],max[1]-min[1],max[2]-min[2])||1;
+    const s=2/diag;
+    for (const v of verts) { v[0]=(v[0]-c[0])*s; v[1]=(v[1]-c[1])*s; v[2]=(v[2]-c[2])*s; }
+  }
+
+  // build edges (wireframe)
+  const edgeSet=new Set(), edges=[];
+  const addEdge=(a,b)=>{ if(a===b) return; const key=a<b?`${a}_${b}`:`${b}_${a}`; if(!edgeSet.has(key)){edgeSet.add(key);edges.push([a,b]);}};
+  for (const f of faces) {
+    const arr=f.vIdx;
+    for (let i=0;i<arr.length;i++) addEdge(arr[i], arr[(i+1)%arr.length]);
+  }
+
+  // triangulate faces (fan)
+  const tris = []; // array of { v:[i0,i1,i2], uv:[[u,v]x3] or null }
+  for (const f of faces) {
+    for (let i=1;i<f.vIdx.length-1;i++) {
+      const v0=f.vIdx[0], v1=f.vIdx[i], v2=f.vIdx[i+1];
+      let uvTri=null;
+      if (f.vtIdx) {
+        const t0=f.vtIdx[0], t1=f.vtIdx[i], t2=f.vtIdx[i+1];
+        if (t0!=null && uvs[t0] && t1!=null && uvs[t1] && t2!=null && uvs[t2]) {
+          uvTri=[ uvs[t0].slice(0,2), uvs[t1].slice(0,2), uvs[t2].slice(0,2) ];
+        }
+      }
+      tris.push({ v:[v0,v1,v2], uv: uvTri });
+    }
+  }
+
+  return { verts, uvs, edges, tris };
+}
+
+/* ========================= Gaussian tessellation texture ========================= */
+function randn() {
+  let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+function gaussianKernel1D(sigma) {
+  const r = Math.max(1, Math.floor(sigma*3));
+  const size = r*2+1;
+  const k = new Float32Array(size);
+  const s2 = 2*sigma*sigma; let sum=0;
+  for (let i=-r,j=0;i<=r;i++,j++){ const val=Math.exp(-(i*i)/s2); k[j]=val; sum+=val; }
+  for (let j=0;j<size;j++) k[j]/=sum;
+  return {k,r};
+}
+function convolveH(src,w,h,{k,r}) {
+  const out=new Float32Array(src.length);
+  for(let y=0;y<h;y++){
+    const row=y*w;
+    for(let x=0;x<w;x++){
+      let acc=0;
+      for(let i=-r;i<=r;i++){
+        const xx=Math.min(w-1,Math.max(0,x+i));
+        acc+=src[row+xx]*k[i+r];
+      }
+      out[row+x]=acc;
+    }
+  }
+  return out;
+}
+function convolveV(src,w,h,{k,r}) {
+  const out=new Float32Array(src.length);
+  for(let x=0;x<w;x++){
+    for(let y=0;y<h;y++){
+      let acc=0;
+      for(let i=-r;i<=r;i++){
+        const yy=Math.min(h-1,Math.max(0,y+i));
+        acc+=src[yy*w+x]*k[i+r];
+      }
+      out[y*w+x]=acc;
+    }
+  }
+  return out;
+}
+function normalize01(a){
+  let mn=Infinity,mx=-Infinity;
+  for(const v of a){ if(v<mn) mn=v; if(v>mx) mx=v; }
+  const rng=mx-mn || 1;
+  const out=new Float32Array(a.length);
+  for(let i=0;i<a.length;i++) out[i]=(a[i]-mn)/rng;
+  return out;
+}
+function quantize(a01,bands){
+  const out=new Uint8Array(a01.length);
+  for(let i=0;i<a01.length;i++){
+    let idx=Math.floor(a01[i]*bands);
+    if(idx>=bands) idx=bands-1;
+    out[i]=idx;
+  }
+  return out;
+}
+function hexFromHSL(h,s,l){
+  l/=100; const a=(s*Math.min(l,1-l))/100;
+  const f=n=>{ const k=(n+h/30)%12; const c=l-a*Math.max(Math.min(k-3,9-k,1),-1); return Math.round(255*c).toString(16).padStart(2,'0'); };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+const normHue = (h)=>((h%360)+360)%360;
+
+function randomPalette5() {
+  // simple 5-color HSL palette (same logic you used), return hex[]
+  let h1=0,h2=0,h3=0,h4=0,h5=0;
+  const hueSeed = Math.floor(Math.random()*361);
+  const hueRange = 1 + Math.floor(Math.random()*10);
+  if (hueRange===1){ h1=hueSeed-130; h2=hueSeed-110; h3=hueSeed; h4=hueSeed+110; h5=hueSeed+130; }
+  if (hueRange===2){ h1=hueSeed+130; h2=hueSeed+110; h3=hueSeed; h4=hueSeed-110; h5=hueSeed-130; }
+  if (hueRange===3){ h1=hueSeed+60;  h2=hueSeed+35;  h3=hueSeed; h4=hueSeed-35;  h5=hueSeed-60;  }
+  if (hueRange===4){ h1=hueSeed-60;  h2=hueSeed-35;  h3=hueSeed; h4=hueSeed+35;  h5=hueSeed+60;  }
+  if (hueRange===5){ h1=hueSeed+190; h2=hueSeed+170; h3=hueSeed; h4=hueSeed-20;  h5=hueSeed-40;  }
+  if (hueRange===6){ h1=hueSeed-40;  h2=hueSeed-20;  h3=hueSeed; h4=hueSeed+170; h5=hueSeed+190; }
+  if (hueRange===7){ h1=hueSeed+30;  h2=hueSeed+15;  h3=hueSeed; h4=hueSeed-15;  h5=hueSeed-30;  }
+  if (hueRange===8){ h1=hueSeed-30;  h2=hueSeed-15;  h3=hueSeed; h4=hueSeed+15;  h5=hueSeed+30;  }
+  if (hueRange===9){ h1=hueSeed+145; h2=hueSeed+70;  h3=hueSeed; h4=hueSeed-70;  h5=hueSeed-145; }
+  if (hueRange===10){h1=hueSeed-145; h2=hueSeed-70;  h3=hueSeed; h4=hueSeed+70;  h5=hueSeed+145; }
+  h1=normHue(h1);h2=normHue(h2);h3=normHue(h3);h4=normHue(h4);h5=normHue(h5);
+  // fixed saturation/lightness mixes
+  const S=[75,75,75,75,75], L=[55,55,55,55,55];
+  return [
+    hexFromHSL(h1,S[0],L[0]),
+    hexFromHSL(h2,S[1],L[1]),
+    hexFromHSL(h3,S[2],L[2]),
+    hexFromHSL(h4,S[3],L[3]),
+    hexFromHSL(h5,S[4],L[4]),
+  ];
+}
+
+function paintBandsToCanvas(q,w,h,palette,scale=1) {
+  const off=document.createElement('canvas');
+  off.width=w; off.height=h;
+  const ctx=off.getContext('2d');
+  const img=ctx.createImageData(w,h); const data=img.data;
+  for (let i=0;i<q.length;i++){
+    const band=q[i]%palette.length;
+    const hex=palette[band];
+    const r=parseInt(hex.slice(1,3),16);
+    const g=parseInt(hex.slice(3,5),16);
+    const b=parseInt(hex.slice(5,7),16);
+    const p=i*4; data[p]=r; data[p+1]=g; data[p+2]=b; data[p+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+  return off;
+}
+
+function generateTessellationTexture(opts) {
+  const { texSize=1024, sigma=9, bands=6 } = opts;
+  const w=texSize, h=texSize;
+  const field=new Float32Array(w*h);
+  for (let i=0;i<field.length;i++) field[i]=randn();
+
+  const ker=gaussianKernel1D(sigma);
+  let f=convolveH(field,w,h,ker);
+  f=convolveV(f,w,h,ker);
+  const q=quantize(normalize01(f), bands);
+  const palette = randomPalette5();
+  const tex = paintBandsToCanvas(q,w,h,palette);
+  return { tex, palette };
+}
+
+/* ========================= viewer state & projection ========================= */
+const canvas = $('#c');
+const ctx = canvas.getContext('2d');
+let model = { verts: [], tris: [], edges: [] };
+
+const state = {
+  yaw: 0, pitch: 0, dist: 3, pan: {x:0,y:0}, userScale: 1,
+  lineWidth: 1.5, lineColor: '#00d5ff', showWire: true,
+  perspective: true, fovDeg: 60,
+  texSize: 1024, sigma: 9, bands: 6, uvScale: 2,
+  texture: null, palette: [],
+};
+
+function resize() {
+  const { clientWidth: w, clientHeight: h } = canvas;
+  canvas.width = Math.max(1, Math.floor(w * DPR));
+  canvas.height = Math.max(1, Math.floor(h * DPR));
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.scale(DPR, DPR);
+}
+window.addEventListener('resize', ()=>{ resize(); render(); });
+
+function rotY(a){ const c=Math.cos(a), s=Math.sin(a); return [ c,0, s,  0,1,0,  -s,0,c ]; }
+function rotX(a){ const c=Math.cos(a), s=Math.sin(a); return [ 1,0,0,  0,c,-s,  0,s,c ]; }
+function mulMat(A,B){
+  const o=Array(9);
+  o[0]=A[0]*B[0]+A[1]*B[3]+A[2]*B[6];
+  o[1]=A[0]*B[1]+A[1]*B[4]+A[2]*B[7];
+  o[2]=A[0]*B[2]+A[1]*B[5]+A[2]*B[8];
+  o[3]=A[3]*B[0]+A[4]*B[3]+A[5]*B[6];
+  o[4]=A[3]*B[1]+A[4]*B[4]+A[5]*B[7];
+  o[5]=A[3]*B[2]+A[4]*B[5]+A[5]*B[8];
+  o[6]=A[6]*B[0]+A[7]*B[3]+A[8]*B[6];
+  o[7]=A[6]*B[1]+A[7]*B[4]+A[8]*B[7];
+  o[8]=A[6]*B[2]+A[7]*B[5]+A[8]*B[8];
+  return o;
+}
+function mulMatVec(m,v){ return [m[0]*v[0]+m[1]*v[1]+m[2]*v[2], m[3]*v[0]+m[4]*v[1]+m[5]*v[2], m[6]*v[0]+m[7]*v[1]+m[8]*v[2]]; }
+
+function projectPoint([x,y,z], w, h) {
+  const R = mulMat(rotY(state.yaw), rotX(state.pitch));
+  const vr = mulMatVec(R, [x*state.userScale, y*state.userScale, z*state.userScale]);
+  const zc = vr[2] + state.dist;
+  let sx, sy, f, s;
+  if (state.perspective) {
+    const fov = state.fovDeg * Math.PI / 180;
+    f = h / (2 * Math.tan(fov/2));
+    sx = (vr[0] * f) / zc + w/2 + state.pan.x;
+    sy = (-vr[1] * f) / zc + h/2 + state.pan.y;
+  } else {
+    s = h * 0.5;
+    sx = vr[0] * s + w/2 + state.pan.x;
+    sy = -vr[1] * s + h/2 + state.pan.y;
+  }
+  return { x: sx, y: sy, zc, behind: zc<=0.001 };
+}
+
+/* ========================= affine texture mapping per triangle =========================
+   We compute a 3x3 transform M that maps source UV triangle (in texture pixels)
+   to destination screen triangle. Then clip to destination triangle and drawImage
+   with ctx.setTransform(M).
+=============================================================================== */
+function mat3Inv(m){
+  // m: [a,b,c, d,e,f, g,h,i] in row-major
+  const A=m[0],B=m[1],C=m[2], D=m[3],E=m[4],F=m[5], G=m[6],H=m[7],I=m[8];
+  const det = A*(E*I-F*H)-B*(D*I-F*G)+C*(D*H-E*G);
+  if (Math.abs(det)<1e-8) return null;
+  const inv=[]; inv[0]=(E*I-F*H)/det; inv[1]=(C*H-B*I)/det; inv[2]=(B*F-C*E)/det;
+               inv[3]=(F*G-D*I)/det; inv[4]=(A*I-C*G)/det; inv[5]=(C*D-A*F)/det;
+               inv[6]=(D*H-E*G)/det; inv[7]=(B*G-A*H)/det; inv[8]=(A*E-B*D)/det;
+  return inv;
+}
+function mat3Mul(A,B){
+  const o=Array(9);
+  o[0]=A[0]*B[0]+A[1]*B[3]+A[2]*B[6];
+  o[1]=A[0]*B[1]+A[1]*B[4]+A[2]*B[7];
+  o[2]=A[0]*B[2]+A[1]*B[5]+A[2]*B[8];
+  o[3]=A[3]*B[0]+A[4]*B[3]+A[5]*B[6];
+  o[4]=A[3]*B[1]+A[4]*B[4]+A[5]*B[7];
+  o[5]=A[3]*B[2]+A[4]*B[5]+A[5]*B[8];
+  o[6]=A[6]*B[0]+A[7]*B[3]+A[8]*B[6];
+  o[7]=A[6]*B[1]+A[7]*B[4]+A[8]*B[7];
+  o[8]=A[6]*B[2]+A[7]*B[5]+A[8]*B[8];
+  return o;
+}
+function drawTexturedTri(ctx, img, dst, src) {
+  // dst: [{x,y},{x,y},{x,y}] screen px
+  // src: [{x,y},{x,y},{x,y}] texture px
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(dst[0].x, dst[0].y);
+  ctx.lineTo(dst[1].x, dst[1].y);
+  ctx.lineTo(dst[2].x, dst[2].y);
+  ctx.closePath();
+  ctx.clip();
+
+  const S = [
+    src[1].x - src[0].x, src[2].x - src[0].x, src[0].x,
+    src[1].y - src[0].y, src[2].y - src[0].y, src[0].y,
+    0,                   0,                   1
+  ];
+  const D = [
+    dst[1].x - dst[0].x, dst[2].x - dst[0].x, dst[0].x,
+    dst[1].y - dst[0].y, dst[2].y - dst[0].y, dst[0].y,
+    0,                   0,                   1
+  ];
+  const SInv = mat3Inv(S);
+  if (!SInv) { ctx.restore(); return; }
+  const M = mat3Mul(D, SInv);
+  // Canvas setTransform(a, b, c, d, e, f) corresponds to:
+  // [ a c e ]
+  // [ b d f ]
+  // [ 0 0 1 ]
+  ctx.setTransform(M[0], M[3], M[1], M[4], M[2], M[5]);
+  ctx.drawImage(img, 0, 0);
+  ctx.restore();
+}
+
+/* ========================= UV helpers ========================= */
+function autoUVForTri(v0,v1,v2, uvScale=1) {
+  // Simple planar projection using x,z -> u,v in [0,1], scaled/tiled
+  // Shift to [0,1] with 0.5 offset so centered meshes tile nicely
+  const toUV = v => ({ u: (v[0]*0.5 + 0.5) * uvScale, v: (v[2]*0.5 + 0.5) * uvScale });
+  const a = toUV(v0), b = toUV(v1), c = toUV(v2);
+  return [a,b,c];
+}
+
+/* ========================= render ========================= */
+function render() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.clearRect(0,0,w,h);
+
+  const projVerts = model.verts.map(v => projectPoint(v, w, h));
+
+  // fill with texture
+  if (state.texture && model.tris.length) {
+    for (const tri of model.tris) {
+      const a = projVerts[tri.v[0]], b = projVerts[tri.v[1]], c = projVerts[tri.v[2]];
+      if (state.perspective && a.behind && b.behind && c.behind) continue;
+
+      const dst = [ {x:a.x,y:a.y},{x:b.x,y:b.y},{x:c.x,y:c.y} ];
+
+      // source UVs in pixels
+      let suv;
+      if (tri.uv) {
+        suv = tri.uv.map(([u,v])=>({ x:u*state.texture.width*state.uvScale, y:(1-v)*state.texture.height*state.uvScale }));
+      } else {
+        const uv = autoUVForTri(
+          model.verts[tri.v[0]],
+          model.verts[tri.v[1]],
+          model.verts[tri.v[2]],
+          state.uvScale
+        );
+        suv = uv.map(({u,v})=>({ x:u*state.texture.width, y:(1-v)*state.texture.height }));
+      }
+      drawTexturedTri(ctx, state.texture, dst, suv);
+    }
+  }
+
+  // wireframe overlay
+  if (state.showWire && model.edges.length) {
+    ctx.lineWidth = state.lineWidth;
+    ctx.strokeStyle = state.lineColor;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (const [i,j] of model.edges) {
+      const p = projVerts[i], q = projVerts[j];
+      if (state.perspective && p.behind && q.behind) continue;
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(q.x, q.y);
+    }
+    ctx.stroke();
+  }
+}
+
+/* ========================= interaction ========================= */
+let dragging=false, last={x:0,y:0}, mode='orbit';
+canvas.addEventListener('mousedown', (e)=>{ dragging=true; mode=e.shiftKey?'pan':'orbit'; last.x=e.clientX; last.y=e.clientY; });
+window.addEventListener('mouseup', ()=>dragging=false);
+window.addEventListener('mousemove', (e)=>{
+  if (!dragging) return;
+  const dx=e.clientX-last.x, dy=e.clientY-last.y; last.x=e.clientX; last.y=e.clientY;
+  if (mode==='orbit'){
+    state.yaw += dx*0.01;
+    state.pitch += dy*0.01;
+    state.pitch = clamp(state.pitch, -Math.PI/2+0.001, Math.PI/2-0.001);
+  } else {
+    state.pan.x += dx;
+    state.pan.y += dy;
+  }
+  render();
+});
+canvas.addEventListener('wheel',(e)=>{
+  e.preventDefault();
+  const factor=Math.exp(-e.deltaY*0.001);
+  state.dist = clamp(state.dist*factor, 0.2, 50);
+  render();
+},{passive:false});
+
+/* ========================= file/drop & texture regen ========================= */
+function loadOBJText(text){
+  model = parseOBJ(text);
+  // reset view
+  state.yaw=0; state.pitch=0; state.dist=3; state.pan.x=0; state.pan.y=0; state.userScale=1;
+  $('#scale').value='1'; $('#scaleVal').textContent='1.00';
+  render();
+}
+$('#file').addEventListener('change', async (e)=>{
+  const f = e.target.files?.[0]; if(!f) return;
+  const text = await f.text();
+  loadOBJText(text);
+});
+window.addEventListener('dragover', e=>e.preventDefault());
+window.addEventListener('drop', async (e)=>{
+  e.preventDefault();
+  const f=[...(e.dataTransfer?.files||[])].find(f=>/\.obj$/i.test(f.name));
+  if(!f) return;
+  const text = await f.text();
+  loadOBJText(text);
+});
+
+function regenTexture(){
+  const { tex, palette } = generateTessellationTexture({ texSize: state.texSize, sigma: state.sigma, bands: state.bands });
+  state.texture = tex; state.palette = palette;
+  // show swatches
+  const box = $('#swatches'); box.innerHTML='';
+  for (const hex of palette){ const d=document.createElement('div'); d.className='swatch'; d.style.background=hex; box.appendChild(d); }
+  render();
+}
+
+/* ========================= UI bindings ========================= */
+const lw=$('#linewidth'), lwVal=$('#lwVal');
+lw.addEventListener('input', ()=>{ state.lineWidth=+lw.value; lwVal.textContent=lw.value; render(); });
+const lc=$('#linecolor'); lc.addEventListener('input', ()=>{ state.lineColor=lc.value; render(); });
+const wire=$('#wire'); wire.addEventListener('change', ()=>{ state.showWire=wire.checked; render(); });
+
+const persp=$('#persp'); persp.addEventListener('change', ()=>{ state.perspective=persp.checked; render(); });
+const fov=$('#fov'), fovVal=$('#fovVal'); fov.addEventListener('input', ()=>{ state.fovDeg=+fov.value; fovVal.textContent=fov.value; render(); });
+const sc=$('#scale'), scVal=$('#scaleVal'); sc.addEventListener('input', ()=>{ state.userScale=+sc.value; scVal.textContent=(+sc.value).toFixed(2); render(); });
+
+const sigma=$('#sigma'), sigmaVal=$('#sigmaVal'); sigma.addEventListener('input', ()=>{ state.sigma=+sigma.value; sigmaVal.textContent=sigma.value; regenTexture(); });
+const bands=$('#bands'), bandsVal=$('#bandsVal'); bands.addEventListener('input', ()=>{ state.bands=+bands.value; bandsVal.textContent=bands.value; regenTexture(); });
+const texSize=$('#texSize'), texSizeVal=$('#texSizeVal'); texSize.addEventListener('input', ()=>{ state.texSize=+texSize.value; texSizeVal.textContent=texSize.value; regenTexture(); });
+const uvScale=$('#uvScale'), uvScaleVal=$('#uvScaleVal'); uvScale.addEventListener('input', ()=>{ state.uvScale=+uvScale.value; uvScaleVal.textContent=(+uvScale.value).toFixed(2); render(); });
+$('#regenTex').addEventListener('click', regenTexture);
+
+/* ========================= boot ========================= */
+function fitCanvas() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  resize();
+}
+window.addEventListener('resize', ()=>{ fitCanvas(); render(); });
+fitCanvas();
+regenTexture(); // create an initial texture
+
+// load a default cube so you see something
+const defaultOBJ = `
+v -0.5 -0.5 -0.5
+v  0.5 -0.5 -0.5
+v  0.5  0.5 -0.5
+v -0.5  0.5 -0.5
+v -0.5 -0.5  0.5
+v  0.5 -0.5  0.5
+v  0.5  0.5  0.5
+v -0.5  0.5  0.5
+f 1 2 3 4
+f 5 6 7 8
+f 1 2 6 5
+f 2 3 7 6
+f 3 4 8 7
+f 4 1 5 8
+`.trim();
+loadOBJText(defaultOBJ);
+</script>
+</body>
+</html>

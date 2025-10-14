@@ -2,39 +2,73 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Gaussian Field Tessellation</title>
+  <title>Gaussian Field Tessellation (Large Output)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { color-scheme: light dark; }
     body { margin: 0; font-family: system-ui, sans-serif; display: grid; grid-template-rows: auto 1fr; height: 100vh; }
-    header { padding: 12px 16px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #00000022; }
+    header { padding: 12px 16px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #00000022; flex-wrap: wrap; }
     label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
     .swatches { display: inline-flex; gap: 4px; margin-left: auto; }
     .swatch { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #00000033; }
-    main { display: grid; place-items: center; background: #111; }
-    canvas { width: min(90vw, 900px); height: auto; box-shadow: 0 8px 30px #0008; background:#222; border-radius: 16px; }
-    button, input[type="range"] { cursor: pointer; }
+    main { background: #111; overflow: auto; }
+    .canvas-wrap { display: grid; place-items: start; padding: 16px; }
+    canvas { box-shadow: 0 8px 30px #0008; background:#222; border-radius: 16px; }
+    button, input[type="range"], input[type="number"] { cursor: pointer; }
+    .size-controls { display: inline-flex; align-items: center; gap: 6px; }
   </style>
 </head>
 <body>
   <header>
     <button id="regen">Regenerate</button>
+
     <label>σ (blur):
       <input id="sigma" type="range" min="1" max="18" value="9" />
       <span id="sigmaVal">9</span>
     </label>
+
     <label>Scale:
-      <input id="scale" type="range" min="2" max="8" value="4" />
+      <input id="scale" type="range" min="1" max="12" value="4" />
       <span id="scaleVal">4</span>
     </label>
+
     <label>Bands:
-      <input id="bands" type="range" min="3" max="12" value="5" />
-      <span id="bandsVal">5</span>
+      <input id="bands" type="range" min="3" max="12" value="6" />
+      <span id="bandsVal">6</span>
     </label>
+
+    <label>Octaves:
+      <input id="octaves" type="range" min="1" max="6" value="4" />
+      <span id="octavesVal">4</span>
+    </label>
+
+    <label>Base Freq:
+      <input id="freq" type="range" min="2" max="64" value="10" />
+      <span id="freqVal">10</span>
+    </label>
+
+    <label>Pixelated:
+      <input id="pixel" type="checkbox" checked />
+    </label>
+
+    <div class="size-controls">
+      <label>Output W:
+        <input id="outW" type="number" min="300" step="100" value="2400" />
+      </label>
+      <label>H:
+        <input id="outH" type="number" min="300" step="100" value="1600" />
+      </label>
+      <button id="applySize">Apply</button>
+    </div>
+
     <div class="swatches" id="swatches"></div>
   </header>
+
   <main>
-    <canvas id="c" width="900" height="600"></canvas>
+    <div class="canvas-wrap">
+      <!-- Start with a big default; you can go much bigger via the controls -->
+      <canvas id="c" width="2400" height="1600"></canvas>
+    </div>
   </main>
 
   <script>
@@ -106,20 +140,20 @@
         return `#${f(0)}${f(8)}${f(4)}`;
       };
 
-      const hex = [
+      return [
         hslToHex(h1,sata,lita),
         hslToHex(h2,satb,litb),
         hslToHex(h3,satc,litc),
         hslToHex(h4,satd,litd),
         hslToHex(h5,sate,lite),
       ];
-      return hex;
     }
 
     // ---------------- UI / Canvas -----------------------------------------
     const $ = (s) => document.querySelector(s);
     const canvas = $('#c');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
     const sigmaInput = $('#sigma');
     const scaleInput = $('#scale');
     const bandsInput = $('#bands');
@@ -128,6 +162,16 @@
     const bandsVal = $('#bandsVal');
     const regenBtn = $('#regen');
     const swatches = $('#swatches');
+
+    const octavesInput = document.getElementById('octaves');
+    const freqInput = document.getElementById('freq');
+    const pixelInput = document.getElementById('pixel');
+    const octavesVal = document.getElementById('octavesVal');
+    const freqVal = document.getElementById('freqVal');
+
+    const outWInput = document.getElementById('outW');
+    const outHInput = document.getElementById('outH');
+    const applySizeBtn = document.getElementById('applySize');
 
     let PALETTE = generatePalette();
 
@@ -142,12 +186,7 @@
     }
     showSwatches();
 
-    // ----------- Gaussian field + blur + quantize -------------------------
-    function randn() {
-      let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random();
-      return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
-    }
-
+    // ----------- Gaussian blur + quantize -------------------------
     function gaussianKernel1D(sigma) {
       const r = Math.max(1, Math.floor(sigma*3));
       const size = r*2+1;
@@ -189,12 +228,6 @@
       return out;
     }
 
-    function generateField(w,h){
-      const f=new Float32Array(w*h);
-      for(let i=0;i<f.length;i++) f[i]=randn();
-      return f;
-    }
-
     function normalize01(a){
       let mn=Infinity,mx=-Infinity;
       for(const v of a){ if(v<mn) mn=v; if(v>mx) mx=v; }
@@ -215,7 +248,6 @@
     }
 
     function paintQuantized(q,w,h,palette){
-      // Use an offscreen canvas via DOM for Safari compatibility
       const off = document.createElement('canvas');
       off.width = w; off.height = h;
       const octx = off.getContext('2d');
@@ -233,22 +265,73 @@
       }
       octx.putImageData(img,0,0);
 
-      // scale up to main canvas without smoothing (pixelated tessellation look)
-      ctx.imageSmoothingEnabled=false;
       ctx.clearRect(0,0,canvas.width,canvas.height);
+      // Respect pixelation toggle when upscaling the coarse field to the large canvas.
+      ctx.imageSmoothingEnabled = !pixelInput.checked;
       ctx.drawImage(off,0,0,canvas.width,canvas.height);
+    }
+
+    // ----- smooth value-noise + fBM helpers -------------------
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function fade(t){ return t*t*(3-2*t); } // smoothstep
+
+    function makeCoarseGrid(w, h, seed=0){
+      let s = seed || Math.floor(Math.random()*1e9);
+      const rnd = ()=> (s = (1664525*s + 1013904223) >>> 0, (s & 0xffff)/0xffff);
+      const g = new Float32Array(w*h);
+      for(let i=0;i<g.length;i++) g[i] = rnd()*2-1;
+      return g;
+    }
+
+    function sampleGrid(grid, gw, gh, x, y){
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      const x1 = Math.min(gw-1, x0+1), y1 = Math.min(gh-1, y0+1);
+      const sx = fade(x - x0), sy = fade(y - y0);
+      const i00 = y0*gw + x0, i10 = y0*gw + x1, i01 = y1*gw + x0, i11 = y1*gw + x1;
+      const a = lerp(grid[i00], grid[i10], sx);
+      const b = lerp(grid[i01], grid[i11], sx);
+      return lerp(a, b, sy);
+    }
+
+    function generateFBMField(w, h, {octaves=4, baseFreq=8, lacunarity=2, gain=0.5, seed=0}={}){
+      const out = new Float32Array(w*h);
+      let amp = 1, freq = baseFreq, totalAmp = 0;
+      for (let o=0; o<octaves; o++){
+        const gw = Math.max(2, Math.floor(freq)+1);
+        const gh = Math.max(2, Math.floor(freq*h/w)+1); // keep aspect
+        const grid = makeCoarseGrid(gw, gh, seed+o*1337);
+        for (let y=0; y<h; y++){
+          for (let x=0; x<w; x++){
+            const u = (x / w) * (gw-1);
+            const v = (y / h) * (gh-1);
+            out[y*w+x] += sampleGrid(grid, gw, gh, u, v) * amp;
+          }
+        }
+        totalAmp += amp;
+        amp *= gain;
+        freq *= lacunarity;
+      }
+      const inv = 1/(totalAmp || 1);
+      for(let i=0;i<out.length;i++) out[i] *= inv; // ~[-1,1]
+      return out;
     }
 
     function render(){
       const sigma=Number(sigmaInput.value);
       const scale=Number(scaleInput.value);
       const bands=Number(bandsInput.value);
+      const octaves=Number(octavesInput.value);
+      const baseFreq=Number(freqInput.value);
       sigmaVal.textContent=sigma; scaleVal.textContent=scale; bandsVal.textContent=bands;
+      octavesVal.textContent=octaves; freqVal.textContent=baseFreq;
 
-      const w=Math.floor(canvas.width/scale);
-      const h=Math.floor(canvas.height/scale);
+      // coarse resolution (logical field) controls detail.
+      // For giant canvases, keep this modest via the 'scale' slider.
+      const w=Math.max(2, Math.floor(canvas.width/scale));
+      const h=Math.max(2, Math.floor(canvas.height/scale));
 
-      let field=generateField(w,h);
+      let field = generateFBMField(w, h, { octaves, baseFreq, lacunarity: 2, gain: 0.5 });
+
       const kernel=gaussianKernel1D(sigma);
       field=convolve1DHorizontal(field,w,h,kernel);
       field=convolve1DVertical(field,w,h,kernel);
@@ -259,13 +342,25 @@
 
     // UI events
     regenBtn.addEventListener('click', ()=>{
-      PALETTE = generatePalette();   // brand new palette each time
+      PALETTE = generatePalette();
       showSwatches();
       render();
     });
     sigmaInput.addEventListener('input', render);
     scaleInput.addEventListener('input', render);
     bandsInput.addEventListener('input', render);
+    octavesInput.addEventListener('input', render);
+    freqInput.addEventListener('input', render);
+    pixelInput.addEventListener('change', render);
+
+    // Resize canvas to huge dimensions and re-render
+    applySizeBtn.addEventListener('click', ()=>{
+      const W = Math.max(100, Math.floor(Number(outWInput.value) || canvas.width));
+      const H = Math.max(100, Math.floor(Number(outHInput.value) || canvas.height));
+      canvas.width = W;
+      canvas.height = H;
+      render();
+    });
 
     // initial paint
     render();

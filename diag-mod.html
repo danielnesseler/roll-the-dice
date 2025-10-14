@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>diag-mod: module load + render</title>
+  <style>
+    :root{color-scheme:light dark}
+    body{margin:0;background:#0b0b0b;display:grid;grid-template-rows:auto 1fr;height:100vh}
+    header{padding:10px 14px;border-bottom:1px solid #0005;font:12px system-ui,sans-serif;color:#ddd}
+    canvas{width:900px;height:600px;justify-self:center;align-self:center;box-shadow:0 10px 40px #000a;border-radius:12px;background:#111}
+    #err{position:fixed;inset:auto 10px 10px 10px;background:#300;border:1px solid #a33;color:#faa;padding:10px;border-radius:8px;font:12px ui-monospace,Consolas,monospace;white-space:pre-wrap;display:none}
+  </style>
+</head>
+<body>
+  <header>diag-mod: attempting to import <code>src/core/math.js</code> and render…</header>
+  <canvas id="c" width="900" height="600"></canvas>
+  <pre id="err"></pre>
+  <script type="module">
+    const errBox = document.getElementById('err');
+    const showErr = (m)=>{ errBox.textContent=m; errBox.style.display='block'; console.error(m); };
+
+    let math;
+    try {
+      math = await import('./src/core/math.js');
+    } catch(e) {
+      showErr(`FAILED TO IMPORT ./src/core/math.js\n${e.message}\n(Check server root & path)`);
+    }
+
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+
+    // If math loaded, use it; else do a local fallback so we still render.
+    const rotY = math?.mat4RotateY ? (v,a)=>{
+      // tiny adapter: just use a simple 3D rotY
+      const c=Math.cos(a), s=Math.sin(a);
+      const x=v[0], y=v[1], z=v[2];
+      return [ c*x + s*z, y, -s*x + c*z ];
+    } : ((v,a)=>{
+      const c=Math.cos(a), s=Math.sin(a);
+      const x=v[0], y=v[1], z=v[2];
+      return [ c*x + s*z, y, -s*x + c*z ];
+    });
+
+    const V=[[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
+    const E=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+    function proj([x,y,z]){const f=500/(z+4);return [canvas.width/2 + x*f, canvas.height/2 - y*f];}
+
+    function draw(t){
+      ctx.fillStyle='#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      const a=t*0.001;
+      const P = V.map(v=>proj(rotY(v,a)));
+      ctx.strokeStyle='#9ef'; ctx.beginPath();
+      for(const [i,j] of E){ const p=P[i], q=P[j]; ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); }
+      ctx.stroke();
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>

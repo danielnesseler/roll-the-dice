@@ -1,0 +1,23 @@
+{
+    "camera": {
+      "eye": [0, 0, 6],
+      "target": [0, 0, 0]
+    },
+    "objects": [
+      {
+        "name": "teapot",
+        "obj": "/assets/models/teapot.obj",
+        "mode": "faces",
+        "uvMode": "box"
+      }
+    ],
+    "tessellation": {
+      "sigma": 8,
+      "bands": 7,
+      "scale": 8,
+      "dither": 0.02,
+      "gamma": 1.0,
+      "paletteSize": 5
+    }
+  }
+  

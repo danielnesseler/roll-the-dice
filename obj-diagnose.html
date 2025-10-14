@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OBJ Diagnose — wireframe & lines</title>
+  <style>
+    body{margin:0;background:#0b0b0b;color:#ddd;font:14px system-ui,sans-serif;display:grid;grid-template-rows:auto 1fr;height:100vh}
+    header{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #0005}
+    header input[type="text"]{width:380px}
+    main{display:grid;place-items:center}
+    canvas{width:min(95vw,1200px);height:75vh;background:#111;border-radius:12px;box-shadow:0 10px 40px #000a}
+    .stats{margin-left:auto;opacity:.85}
+    #err{position:fixed;left:10px;right:10px;bottom:10px;background:#300;border:1px solid #a33;color:#fee;padding:10px;border-radius:8px;display:none;white-space:pre-wrap}
+    label{display:inline-flex;align-items:center;gap:6px}
+  </style>
+</head>
+<body>
+<header>
+  <button id="loadTeapot">Load /assets/models/teapot.obj</button>
+  <label>URL <input id="url" type="text" placeholder="/assets/models/teapot.obj"></label>
+  <button id="loadUrl">Fetch URL</button>
+  <label>Local OBJ <input id="file" type="file" accept=".obj"></label>
+  <label>Mode
+    <select id="mode">
+      <option value="wire">Faces → wireframe</option>
+      <option value="lines">OBJ lines (l)</option>
+      <option value="points">Points</option>
+    </select>
+  </label>
+  <label>Spin <input id="spin" type="checkbox" checked></label>
+  <div class="stats" id="stats">—</div>
+</header>
+<main>
+  <canvas id="c" width="1200" height="800"></canvas>
+</main>
+<pre id="err"></pre>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const stats = document.getElementById('stats');
+const errBox = document.getElementById('err');
+
+const showErr = m => { errBox.textContent = m; errBox.style.display='block'; console.error(m); };
+const clearErr = () => { errBox.style.display='none'; errBox.textContent=''; };
+
+function parseOBJ(text){
+  const verts=[], faces=[], lines=[];
+  const tri = (idx)=>{ if(idx.length===3) faces.push([idx[0],idx[1],idx[2]]);
+                       else if(idx.length===4){faces.push([idx[0],idx[1],idx[2]]);faces.push([idx[0],idx[2],idx[3]]);} };
+  const normIndex = (w)=> parseInt(w.split('/')[0],10)-1;
+
+  for (const raw of text.split('\n')) {
+    const s = raw.trim(); if (!s || s.startsWith('#')) continue;
+    const parts = s.split(/\s+/);
+    if (parts[0]==='v'){ verts.push([+parts[1], +parts[2], +parts[3]]); }
+    else if (parts[0]==='f'){ tri(parts.slice(1).map(normIndex)); }
+    else if (parts[0]==='l'){ // polyline: l v1 v2 v3 ...
+      const idx = parts.slice(1).map(normIndex);
+      for (let i=0;i<idx.length-1;i++) lines.push([idx[i], idx[i+1]]);
+    }
+  }
+  return {verts, faces, lines};
+}
+
+function centerAndScale(verts){
+  let min=[Infinity,Infinity,Infinity], max=[-Infinity,-Infinity,-Infinity];
+  for (const v of verts){
+    if (v[0]<min[0]) min[0]=v[0]; if (v[1]<min[1]) min[1]=v[1]; if (v[2]<min[2]) min[2]=v[2];
+    if (v[0]>max[0]) max[0]=v[0]; if (v[1]>max[1]) max[1]=v[1]; if (v[2]>max[2]) max[2]=v[2];
+  }
+  const c=[(min[0]+max[0])/2, (min[1]+max[1])/2, (min[2]+max[2])/2];
+  const sx=max[0]-min[0], sy=max[1]-min[1], sz=max[2]-min[2];
+  const s = Math.max(sx, sy, sz) || 1;
+  return verts.map(v=>[(v[0]-c[0])*(2/s), (v[1]-c[1])*(2/s), (v[2]-c[2])*(2/s)]);
+}
+
+function edgesFromFaces(faces){
+  const set = new Set(), add=(a,b)=>{const k=a<b?`${a}-${b}`:`${b}-${a}`; set.add(k);};
+  for (const f of faces){ add(f[0],f[1]); add(f[1],f[2]); add(f[2],f[0]); }
+  const out=[]; for (const k of set){ const [a,b]=k.split('-').map(Number); out.push([a,b]); }
+  return out;
+}
+
+function rotY([x,y,z], a){ const c=Math.cos(a), s=Math.sin(a); return [ c*x + s*z, y, -s*x + c*z ]; }
+function rotX([x,y,z], a){ const c=Math.cos(a), s=Math.sin(a); return [ x, c*y - s*z, s*y + c*z ]; }
+function proj([x,y,z]){ const f=700/(z+5); return [ canvas.width/2 + x*f, canvas.height/2 - y*f ]; }
+
+let GEO = null; // {V,E,L}
+let SPIN = true;
+let MODE = 'wire'; // 'wire' | 'lines' | 'points'
+
+function setGeometry(model){
+  const V = centerAndScale(model.verts);
+  const E = edgesFromFaces(model.faces);
+  const L = model.lines;
+  GEO = { V, E, L };
+  stats.textContent = `verts: ${V.length}, faces: ${model.faces.length}, edges(from faces): ${E.length}, lines(l): ${L.length}`;
+}
+
+async function loadFromUrl(url){
+  clearErr();
+  try{
+    const res = await fetch(url, {cache: 'no-cache'});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const txt = await res.text();
+    const parsed = parseOBJ(txt);
+    setGeometry(parsed);
+  }catch(e){ showErr(`Fetch/parse error: ${e.message}\nURL: ${url}`); }
+}
+
+function loadFromFile(file){
+  clearErr();
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const parsed = parseOBJ(String(reader.result));
+      setGeometry(parsed);
+    }catch(e){ showErr(`Parse error: ${e.message}`); }
+  };
+  reader.readAsText(file);
+}
+
+function draw(t){
+  ctx.fillStyle='#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  if (!GEO){ requestAnimationFrame(draw); return; }
+
+  const a = SPIN ? t*0.001 : 0;
+  const PV = GEO.V.map(v => proj(rotX(rotY(v,a*0.6), a*0.35)));
+
+  if (MODE==='points'){
+    ctx.fillStyle='#9ef';
+    for (const p of PV){ ctx.fillRect(p[0], p[1], 2, 2); }
+  } else if (MODE==='lines' && GEO.L.length){
+    ctx.strokeStyle='#9ef'; ctx.lineWidth=1; ctx.beginPath();
+    for (const [i,j] of GEO.L){ const p=PV[i], q=PV[j]; ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); }
+    ctx.stroke();
+  } else { // wire from faces (edges)
+    ctx.strokeStyle='#9ef'; ctx.lineWidth=1; ctx.beginPath();
+    for (const [i,j] of GEO.E){ const p=PV[i], q=PV[j]; ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); }
+    ctx.stroke();
+  }
+  requestAnimationFrame(draw);
+}
+
+// UI
+document.getElementById('loadTeapot').onclick = ()=> loadFromUrl('/assets/models/teapot.obj');
+document.getElementById('loadUrl').onclick = ()=>{
+  const u = document.getElementById('url').value.trim();
+  if (u) loadFromUrl(u);
+};
+document.getElementById('file').onchange = (e)=>{
+  const f = e.target.files?.[0]; if (f) loadFromFile(f);
+};
+document.getElementById('spin').onchange = (e)=>{ SPIN = e.target.checked; };
+document.getElementById('mode').onchange = (e)=>{ MODE = e.target.value; };
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

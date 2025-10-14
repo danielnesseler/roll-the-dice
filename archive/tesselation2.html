@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Gaussian Field Tessellation — Max Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+    aside { padding: 12px; overflow: auto; border-right: 1px solid #0003; background: #111; color: #eee; }
+    main  { display: grid; place-items: center; background: #000; }
+    h2 { font-size: 14px; letter-spacing: .08em; text-transform: uppercase; opacity:.8; margin: 14px 0 8px; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; margin: 8px 0; }
+    .row input[type="range"] { width: 100%; }
+    .row input[type="number"], .row select { width: 100%; box-sizing: border-box; }
+    .small { font-size: 12px; opacity: .8; }
+    .grid { display: grid; gap: 8px; }
+    .group { border: 1px solid #fff1; border-radius: 10px; padding: 10px; background: #111; }
+    .swatches { display: flex; gap: 4px; flex-wrap: wrap; }
+    .swatch { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #0006; }
+    button { cursor: pointer; }
+    canvas { background: #111; box-shadow: 0 10px 40px #000a; border-radius: 16px; max-width: 100%; height: auto; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="grid">
+      <div class="group">
+        <h2>Actions</h2>
+        <div class="two">
+          <button id="regen">Regenerate</button>
+          <button id="newSeed">New Seed</button>
+        </div>
+        <div class="row small">
+          <div>Info</div>
+          <div id="info" style="text-align:right;">—</div>
+        </div>
+        <div class="swatches" id="swatches"></div>
+      </div>
+
+      <div class="group">
+        <h2>Image & Field</h2>
+        <div class="row"><label>Width (px)</label>  <input id="W" type="number" min="300" max="6000" value="1400"></div>
+        <div class="row"><label>Height (px)</label> <input id="H" type="number" min="300" max="6000" value="900"></div>
+        <div class="row"><label>Scale (↓ res)</label><input id="scale" type="range" min="1" max="20" value="4"><span id="scaleVal">4</span></div>
+        <div class="row"><label>Blur σ</label>      <input id="sigma" type="range" min="0" max="20" value="8"><span id="sigmaVal">8</span></div>
+        <div class="row"><label>Bands</label>       <input id="bands" type="range" min="3" max="24" value="7"><span id="bandsVal">7</span></div>
+        <div class="row"><label>Band Gamma</label>  <input id="bandGamma" type="range" step="0.01" min="0.5" max="2.0" value="1.0"><span id="bandGammaVal">1.00</span></div>
+        <div class="row"><label>Dither</label>      <input id="dither" type="range" step="0.001" min="0" max="0.1" value="0.02"><span id="ditherVal">0.020</span></div>
+        <div class="row"><label>Wrap</label>
+          <select id="wrap">
+            <option value="repeat" selected>repeat</option>
+            <option value="reflect">reflect</option>
+            <option value="clamp">clamp</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Palette Structure</h2>
+        <div class="row"><label>Palette Size</label> <input id="palSize" type="range" min="3" max="12" value="5"><span id="palSizeVal">5</span></div>
+        <div class="row"><label>Hue Seed (°)</label> <input id="hueSeed" type="range" min="0" max="359" value="0"><span id="hueSeedVal">0</span></div>
+        <div class="row"><label>Hue Mode</label>
+          <select id="hueMode">
+            <option value="even">even</option>
+            <option value="triadic" selected>triadic</option>
+            <option value="complementary">complementary</option>
+            <option value="splitcomp">split-comp</option>
+            <option value="analogous">analogous</option>
+            <option value="tetradic">tetradic</option>
+            <option value="mono">mono</option>
+            <option value="custom">custom offsets</option>
+          </select>
+        </div>
+        <div class="row"><label>Custom Offsets (°)</label><input id="customOffsets" type="text" placeholder="e.g. 0,120,240"></div>
+        <div class="row"><label>Hue Rotation (°)</label><input id="hueRot" type="range" min="-180" max="180" value="0"><span id="hueRotVal">0</span></div>
+        <div class="row"><label>Hue Jitter (±°)</label><input id="hueJitter" type="range" min="0" max="20" value="6"><span id="hueJitterVal">6</span></div>
+      </div>
+
+      <div class="group">
+        <h2>Saturation Pattern</h2>
+        <div class="row"><label>Sat Base %</label>   <input id="satBase" type="range" min="0" max="100" value="70"><span id="satBaseVal">70</span></div>
+        <div class="row"><label>Sat Spread %</label> <input id="satSpread" type="range" min="0" max="60" value="20"><span id="satSpreadVal">20</span></div>
+        <div class="row"><label>Sat Curve</label>
+          <select id="satCurve">
+            <option value="linear" selected>linear</option>
+            <option value="easeIn">ease-in</option>
+            <option value="easeOut">ease-out</option>
+            <option value="easeInOut">ease-in-out</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Lightness Pattern</h2>
+        <div class="row"><label>Light Base %</label>   <input id="litBase" type="range" min="0" max="100" value="55"><span id="litBaseVal">55</span></div>
+        <div class="row"><label>Light Spread %</label> <input id="litSpread" type="range" min="0" max="60" value="20"><span id="litSpreadVal">20</span></div>
+        <div class="row"><label>Light Curve</label>
+          <select id="litCurve">
+            <option value="linear" selected>linear</option>
+            <option value="easeIn">ease-in</option>
+            <option value="easeOut">ease-out</option>
+            <option value="easeInOut">ease-in-out</option>
+          </select>
+        </div>
+        <div class="row"><label>Light Order</label>
+          <select id="litOrder">
+            <option value="darkFirst">dark → light</option>
+            <option value="lightFirst" selected>light → dark</option>
+            <option value="darkMiddle">darkest middle</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Palette Adjustments</h2>
+        <div class="row"><label>Hue Shift (°)</label> <input id="adjHue" type="range" min="-180" max="180" value="0"><span id="adjHueVal">0</span></div>
+        <div class="row"><label>Sat ×</label>         <input id="adjSat" type="range" min="0" max="2" step="0.01" value="1"><span id="adjSatVal">1.00</span></div>
+        <div class="row"><label>Bright ±</label>      <input id="adjBright" type="range" min="-50" max="50" value="0"><span id="adjBrightVal">0</span></div>
+        <div class="row"><label>Contrast ×</label>    <input id="adjContrast" type="range" min="0.5" max="2" step="0.01" value="1"><span id="adjContrastVal">1.00</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <canvas id="c" width="1400" height="900"></canvas>
+  </main>
+
+  <script>
+    // ---------- utils ----------
+    const $ = s => document.querySelector(s);
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    const normHue = h => ((h % 360) + 360) % 360;
+    const randRange = (a,b) => a + Math.random()*(b-a);
+
+    function hslToHex(h,s,l) {
+      l/=100;
+      const a=(s*Math.min(l,1-l))/100;
+      const f=n=>{
+        const k=(n+h/30)%12;
+        const c=l-a*Math.max(Math.min(k-3,9-k,1),-1);
+        return Math.round(255*c).toString(16).padStart(2,'0');
+      };
+      return `#${f(0)}${f(8)}${f(4)}`;
+    }
+    function hexToRgb(hex){ return {
+      r: parseInt(hex.slice(1,3),16),
+      g: parseInt(hex.slice(3,5),16),
+      b: parseInt(hex.slice(5,7),16),
+    }; }
+    function rgbToHsl(r,g,b){
+      r/=255; g/=255; b/=255;
+      const mx=Math.max(r,g,b), mn=Math.min(r,g,b);
+      let h, s, l=(mx+mn)/2;
+      const d=mx-mn;
+      if(!d){ h=0; s=0; }
+      else {
+        s = l>0.5 ? d/(2-mx-mn) : d/(mx+mn);
+        switch(mx){
+          case r: h=(g-b)/d+(g<b?6:0); break;
+          case g: h=(b-r)/d+2; break;
+          default: h=(r-g)/d+4;
+        }
+        h*=60;
+      }
+      return [h, s*100, l*100];
+    }
+
+    function curveT(t, kind) {
+      if (kind==='linear') return t;
+      if (kind==='easeIn')  return t*t;
+      if (kind==='easeOut') return 1 - (1-t)*(1-t);
+      // easeInOut
+      return t<.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2;
+    }
+
+    // ---------- palette generation ----------
+    function makeHueOffsets(mode, n, customCsv) {
+      const anchors = {
+        mono:        [0],
+        complementary:[0,180],
+        splitcomp:   [0,150,210],
+        triadic:     [0,120,240],
+        tetradic:    [0,90,180,270],
+        analogous:   [-60,-30,0,30,60],
+      };
+      if (mode === 'even') {
+        return Array.from({length:n}, (_,i)=> i*360/n);
+      }
+      if (mode === 'custom') {
+        const list = (customCsv||'0').split(',').map(x=>Number(x.trim())||0);
+        return Array.from({length:n}, (_,i)=> list[i % list.length]);
+      }
+      const base = anchors[mode] || anchors.triadic;
+      return Array.from({length:n}, (_,i)=> base[i % base.length]);
+    }
+
+    function generatePalette(opts) {
+      const {
+        palSize, hueSeed, hueRot, hueJitterDeg, hueMode, customOffsets,
+        satBase, satSpread, satCurve,
+        litBase, litSpread, litCurve, litOrder
+      } = opts;
+
+      const n = palSize;
+      const offsets = makeHueOffsets(hueMode, n, customOffsets);
+      const hues = offsets.map((off,i)=>{
+        const j = hueJitterDeg ? randRange(-hueJitterDeg, hueJitterDeg) : 0;
+        return normHue(hueSeed + hueRot + off + j);
+      });
+
+      // Saturation & Lightness across index with curves
+      const sats = [];
+      const lits = [];
+      for (let i=0;i<n;i++){
+        const t = n<=1 ? 0 : i/(n-1);
+        const ts = curveT(t, satCurve);
+        const tl = curveT(t, litCurve);
+
+        // spread is symmetric around base: base ± (spread/2)
+        const s = clamp(satBase + (ts - 0.5)*2*satSpread, 0, 100);
+        let l;
+        if (litOrder==='darkFirst') {
+          l = clamp(litBase - (tl - 0.5)*2*litSpread, 0, 100);
+        } else if (litOrder==='darkMiddle') {
+          // peak lightness at ends, darkest at middle
+          const mid = 1 - 4*(t-0.5)*(t-0.5); // 0..1 peaked at middle
+          l = clamp(litBase - (mid-0.5)*2*litSpread, 0, 100);
+        } else {
+          // lightFirst
+          l = clamp(litBase + (tl - 0.5)*2*litSpread, 0, 100);
+        }
+        sats.push(s); lits.push(l);
+      }
+
+      return hues.map((h,i)=> hslToHex(h, sats[i], lits[i]));
+    }
+
+    // palette-level adjustments (applied after generation)
+    function adjustPalette(hexList, {adjHue, adjSat, adjBright, adjContrast}) {
+      // Contrast is around L=50; Brightness adds to L.
+      return hexList.map(hex=>{
+        const {r,g,b} = hexToRgb(hex);
+        let [h,s,l] = rgbToHsl(r,g,b);
+        h = normHue(h + adjHue);
+        s = clamp(s * adjSat, 0, 100);
+        l = clamp(50 + (l - 50) * adjContrast + adjBright, 0, 100);
+        return hslToHex(h,s,l);
+      });
+    }
+
+    // ---------- field & render ----------
+    const canvas = $('#c');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    function randn() { // Box-Muller
+      let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random();
+      return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+    }
+
+    function generateField(w,h){
+      const f=new Float32Array(w*h);
+      for(let i=0;i<f.length;i++) f[i]=randn();
+      return f;
+    }
+
+    function gaussianKernel1D(sigma) {
+      if (sigma<=0) return {k:new Float32Array([1]), r:0};
+      const r = Math.max(1, Math.floor(sigma*3));
+      const size = r*2+1;
+      const k = new Float32Array(size);
+      const s2 = 2*sigma*sigma; let sum=0;
+      for (let i=-r,j=0;i<=r;i++,j++){ const val=Math.exp(-(i*i)/s2); k[j]=val; sum+=val; }
+      for (let j=0;j<size;j++) k[j]/=sum;
+      return {k,r};
+    }
+
+    function convolve1DHorizontal(src,w,h,{k,r}) {
+      const out=new Float32Array(src.length);
+      if (r===0) return src.slice(0);
+      for(let y=0;y<h;y++){
+        const row=y*w;
+        for(let x=0;x<w;x++){
+          let acc=0;
+          for(let i=-r;i<=r;i++){
+            const xx=Math.min(w-1,Math.max(0,x+i));
+            acc+=src[row+xx]*k[i+r];
+          }
+          out[row+x]=acc;
+        }
+      }
+      return out;
+    }
+
+    function convolve1DVertical(src,w,h,{k,r}) {
+      const out=new Float32Array(src.length);
+      if (r===0) return src.slice(0);
+      for(let x=0;x<w;x++){
+        for(let y=0;y<h;y++){
+          let acc=0;
+          for(let i=-r;i<=r;i++){
+            const yy=Math.min(h-1,Math.max(0,y+i));
+            acc+=src[yy*w+x]*k[i+r];
+          }
+          out[y*w+x]=acc;
+        }
+      }
+      return out;
+    }
+
+    function normalize01(a){
+      let mn=Infinity,mx=-Infinity;
+      for(const v of a){ if(v<mn) mn=v; if(v>mx) mx=v; }
+      const rng=mx-mn || 1;
+      const out=new Float32Array(a.length);
+      for(let i=0;i<a.length;i++) out[i]=(a[i]-mn)/rng;
+      return out;
+    }
+
+    function applyBandGamma(a01, gamma){
+      const out=new Float32Array(a01.length);
+      const g = gamma;
+      for(let i=0;i<a01.length;i++) out[i]=Math.pow(a01[i], g);
+      return out;
+    }
+
+    function addDither(a01, amt){
+      if (amt<=0) return a01;
+      const out=new Float32Array(a01.length);
+      for (let i=0;i<a01.length;i++){
+        out[i]=clamp(a01[i] + (Math.random()-0.5)*amt, 0, 1);
+      }
+      return out;
+    }
+
+    function quantizeToBands(a01, bands){
+      const out=new Uint16Array(a01.length);
+      const B = Math.max(1, bands|0);
+      for(let i=0;i<a01.length;i++){
+        let idx = Math.floor(a01[i]*B);
+        if (idx>=B) idx=B-1;
+        out[i]=idx;
+      }
+      return out;
+    }
+
+    function wrapIndex(i, n, mode){
+      if (mode==='repeat')  return i % n;
+      if (mode==='clamp')   return Math.max(0, Math.min(n-1, i));
+      // reflect:
+      const period = 2*(n-1);
+      let t = i % period; if (t<0) t += period;
+      return t <= (n-1) ? t : period - t;
+    }
+
+    function paintQuantizedToCtx(q, w, h, palette, wrapMode, destCtx, W, H){
+      const off = document.createElement('canvas');
+      off.width = w; off.height = h;
+      const octx = off.getContext('2d');
+      const img = octx.createImageData(w,h);
+      const data = img.data;
+
+      for (let i=0;i<q.length;i++){
+        const band = wrapIndex(q[i], palette.length, wrapMode);
+        const hex = palette[band];
+        const r = parseInt(hex.slice(1,3),16);
+        const g = parseInt(hex.slice(3,5),16);
+        const b = parseInt(hex.slice(5,7),16);
+        const p = i*4;
+        data[p+0]=r; data[p+1]=g; data[p+2]=b; data[p+3]=255;
+      }
+      octx.putImageData(img,0,0);
+      destCtx.imageSmoothingEnabled = false;
+      destCtx.clearRect(0,0,W,H);
+      destCtx.drawImage(off, 0,0, W,H);
+    }
+
+    // ---------- wiring ----------
+    const ctrl = {
+      W: $('#W'), H: $('#H'), scale: $('#scale'), sigma: $('#sigma'),
+      bands: $('#bands'), bandGamma: $('#bandGamma'), dither: $('#dither'), wrap: $('#wrap'),
+
+      palSize: $('#palSize'), hueSeed: $('#hueSeed'), hueMode: $('#hueMode'),
+      customOffsets: $('#customOffsets'), hueRot: $('#hueRot'), hueJitter: $('#hueJitter'),
+
+      satBase: $('#satBase'), satSpread: $('#satSpread'), satCurve: $('#satCurve'),
+      litBase: $('#litBase'), litSpread: $('#litSpread'), litCurve: $('#litCurve'), litOrder: $('#litOrder'),
+
+      adjHue: $('#adjHue'), adjSat: $('#adjSat'), adjBright: $('#adjBright'), adjContrast: $('#adjContrast'),
+
+      scaleVal: $('#scaleVal'), sigmaVal: $('#sigmaVal'), bandsVal: $('#bandsVal'),
+      bandGammaVal: $('#bandGammaVal'), ditherVal: $('#ditherVal'),
+      palSizeVal: $('#palSizeVal'), hueSeedVal: $('#hueSeedVal'), hueRotVal: $('#hueRotVal'),
+      hueJitterVal: $('#hueJitterVal'), satBaseVal: $('#satBaseVal'), satSpreadVal: $('#satSpreadVal'),
+      litBaseVal: $('#litBaseVal'), litSpreadVal: $('#litSpreadVal'),
+      adjHueVal: $('#adjHueVal'), adjSatVal: $('#adjSatVal'), adjBrightVal: $('#adjBrightVal'), adjContrastVal: $('#adjContrastVal'),
+
+      regen: $('#regen'), newSeed: $('#newSeed'), swatches: $('#swatches'), info: $('#info')
+    };
+
+    function uiVals() {
+      return {
+        W: Number(ctrl.W.value), H: Number(ctrl.H.value),
+        scale: Number(ctrl.scale.value), sigma: Number(ctrl.sigma.value),
+        bands: Number(ctrl.bands.value), bandGamma: Number(ctrl.bandGamma.value),
+        dither: Number(ctrl.dither.value), wrap: ctrl.wrap.value,
+
+        palSize: Number(ctrl.palSize.value),
+        hueSeed: Number(ctrl.hueSeed.value), hueMode: ctrl.hueMode.value,
+        customOffsets: ctrl.customOffsets.value,
+        hueRot: Number(ctrl.hueRot.value), hueJitterDeg: Number(ctrl.hueJitter.value),
+
+        satBase: Number(ctrl.satBase.value), satSpread: Number(ctrl.satSpread.value), satCurve: ctrl.satCurve.value,
+        litBase: Number(ctrl.litBase.value), litSpread: Number(ctrl.litSpread.value), litCurve: ctrl.litCurve.value, litOrder: ctrl.litOrder.value,
+
+        adjHue: Number(ctrl.adjHue.value), adjSat: Number(ctrl.adjSat.value),
+        adjBright: Number(ctrl.adjBright.value), adjContrast: Number(ctrl.adjContrast.value),
+      };
+    }
+
+    function syncReadouts(){
+      ctrl.scaleVal.textContent = ctrl.scale.value;
+      ctrl.sigmaVal.textContent = ctrl.sigma.value;
+      ctrl.bandsVal.textContent = ctrl.bands.value;
+      ctrl.bandGammaVal.textContent = Number(ctrl.bandGamma.value).toFixed(2);
+      ctrl.ditherVal.textContent = Number(ctrl.dither.value).toFixed(3);
+      ctrl.palSizeVal.textContent = ctrl.palSize.value;
+      ctrl.hueSeedVal.textContent = ctrl.hueSeed.value;
+      ctrl.hueRotVal.textContent = ctrl.hueRot.value;
+      ctrl.hueJitterVal.textContent = ctrl.hueJitter.value;
+      ctrl.satBaseVal.textContent = ctrl.satBase.value;
+      ctrl.satSpreadVal.textContent = ctrl.satSpread.value;
+      ctrl.litBaseVal.textContent = ctrl.litBase.value;
+      ctrl.litSpreadVal.textContent = ctrl.litSpread.value;
+      ctrl.adjHueVal.textContent = ctrl.adjHue.value;
+      ctrl.adjSatVal.textContent = Number(ctrl.adjSat.value).toFixed(2);
+      ctrl.adjBrightVal.textContent = ctrl.adjBright.value;
+      ctrl.adjContrastVal.textContent = Number(ctrl.adjContrast.value).toFixed(2);
+    }
+
+    let BASE_PALETTE = [];
+    function showSwatches(hexes) {
+      ctrl.swatches.innerHTML = '';
+      for (const col of hexes) {
+        const d = document.createElement('div');
+        d.className = 'swatch';
+        d.style.background = col;
+        ctrl.swatches.appendChild(d);
+      }
+    }
+
+    function regeneratePalette(){
+      const v = uiVals();
+      BASE_PALETTE = generatePalette(v);
+      const active = adjustPalette(BASE_PALETTE, v);
+      showSwatches(active);
+    }
+
+    function render() {
+      syncReadouts();
+      const v = uiVals();
+
+      // canvas size
+      if (canvas.width !== v.W || canvas.height !== v.H) {
+        canvas.width = v.W; canvas.height = v.H;
+      }
+
+      // palette
+      const ACTIVE_PALETTE = adjustPalette(BASE_PALETTE.length ? BASE_PALETTE : generatePalette(v), v);
+      showSwatches(ACTIVE_PALETTE);
+
+      // field size from scale
+      const w = Math.max(1, Math.floor(v.W / v.scale));
+      const h = Math.max(1, Math.floor(v.H / v.scale));
+
+      let field = generateField(w,h);
+      const kernel = gaussianKernel1D(v.sigma);
+      field = convolve1DHorizontal(field,w,h,kernel);
+      field = convolve1DVertical(field,w,h,kernel);
+
+      let a01 = normalize01(field);
+      a01 = applyBandGamma(a01, v.bandGamma);
+      a01 = addDither(a01, v.dither);
+
+      const q = quantizeToBands(a01, v.bands);
+      paintQuantizedToCtx(q, w, h, ACTIVE_PALETTE, v.wrap, ctx, v.W, v.H);
+
+      ctrl.info.textContent = `W×H: ${v.W}×${v.H}, res: ${w}×${h}, palette: ${ACTIVE_PALETTE.length} colors`;
+    }
+
+    // events
+    for (const sel of [
+      '#W','#H','#scale','#sigma','#bands','#bandGamma','#dither','#wrap',
+      '#palSize','#hueSeed','#hueMode','#customOffsets','#hueRot','#hueJitter',
+      '#satBase','#satSpread','#satCurve','#litBase','#litSpread','#litCurve','#litOrder',
+      '#adjHue','#adjSat','#adjBright','#adjContrast'
+    ]) {
+      $(sel).addEventListener('input', ()=>{
+        if (sel==='#palSize' || sel==='#hueSeed' || sel==='#hueMode' || sel==='#customOffsets' || sel==='#hueRot' || sel==='#hueJitter' ||
+            sel==='#satBase'|| sel==='#satSpread'|| sel==='#satCurve' || sel==='#litBase'|| sel==='#litSpread'|| sel==='#litCurve'|| sel==='#litOrder') {
+          regeneratePalette();
+        }
+        render();
+      });
+    }
+
+    ctrl.regen.addEventListener('click', render);
+    ctrl.newSeed.addEventListener('click', ()=>{
+      ctrl.hueSeed.value = Math.floor(Math.random()*360);
+      regeneratePalette();
+      render();
+    });
+
+    // init
+    regeneratePalette();
+    render();
+  </script>
+</body>
+</html>

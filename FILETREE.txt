@@ -1,0 +1,41 @@
+.
+├── .gitignore
+├── FILETREE.txt
+├── archive
+│   ├── index.js
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── palette.js
+│   ├── preview.html
+│   ├── tesselation2.html
+│   ├── tessellation.html
+│   ├── tessellation3d.html
+│   ├── wiremesh.html
+│   ├── wiremesh_gaussian.html
+│   ├── wiremesh_gaussian_max.html
+│   └── wiremesh_tessellated.html
+├── assets
+│   ├── manifest.json
+│   ├── models
+│   │   └── teapot.obj
+│   └── scenes
+│       └── demo.json
+├── diag.html
+├── index.html
+└── src
+    ├── app.js
+    ├── core
+    │   ├── math.js
+    │   ├── objLoader.js
+    │   └── scene.js
+    ├── effects
+    │   └── gaussian.js
+    ├── materials
+    │   ├── material.js
+    │   └── textureMaterial.js
+    ├── palette
+    │   └── palette.js
+    └── utils
+        └── cache.js
+
+11 directories, 28 files

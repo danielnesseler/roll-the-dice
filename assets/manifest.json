@@ -1,0 +1,10 @@
+{
+    "models": [
+      { "name": "Teapot",  "path": "assets/models/teapot.obj" },
+      { "name": "Bunny",   "path": "assets/models/bunny.obj"  }
+    ],
+    "scenes": [
+      { "name": "Demo",    "path": "assets/scenes/demo.json" }
+    ]
+  }
+  

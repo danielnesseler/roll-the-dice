@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OBJ Wireframe (standalone)</title>
+  <style>
+    body{margin:0;background:#0b0b0b;display:grid;grid-template-rows:auto 1fr;height:100vh;color:#ddd;font:14px system-ui,sans-serif}
+    header{padding:10px 14px;border-bottom:1px solid #0005}
+    canvas{width:min(95vw,1200px);height:75vh;justify-self:center;align-self:center;background:#111;border-radius:12px;box-shadow:0 10px 40px #000a}
+    #err{position:fixed;left:10px;right:10px;bottom:10px;background:#300;border:1px solid #a33;color:#fee;padding:10px;border-radius:8px;display:none;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+  <header>OBJ Wireframe — fetching <code>/assets/models/teapot.obj</code></header>
+  <canvas id="c" width="1200" height="800"></canvas>
+  <pre id="err"></pre>
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const errBox = document.getElementById('err');
+    const showErr = m => { errBox.textContent = m; errBox.style.display='block'; console.error(m); };
+
+    // Minimal OBJ parser: supports only 'v' and 'f'. Faces can be triangles or quads.
+    function parseOBJ(text){
+      const verts = [];
+      const faces = [];
+      for (const raw of text.split('\n')) {
+        const line = raw.trim();
+        if (!line || line.startsWith('#')) continue;
+        const parts = line.split(/\s+/);
+        const tag = parts[0];
+        if (tag === 'v') {
+          verts.push([+parts[1], +parts[2], +parts[3]]);
+        } else if (tag === 'f') {
+          const idx = parts.slice(1).map(w => {
+            const n = w.split('/')[0];
+            return parseInt(n, 10) - 1; // OBJ indices are 1-based
+          });
+          if (idx.length === 3) faces.push([idx[0], idx[1], idx[2]]);
+          else if (idx.length === 4) {
+            faces.push([idx[0], idx[1], idx[2]]);
+            faces.push([idx[0], idx[2], idx[3]]);
+          }
+        }
+      }
+      return { verts, faces };
+    }
+
+    function centerAndScale(verts){
+      // center to origin and normalize to ~2 units
+      let min=[Infinity,Infinity,Infinity], max=[-Infinity,-Infinity,-Infinity];
+      for (const v of verts){
+        if (v[0]<min[0]) min[0]=v[0]; if (v[1]<min[1]) min[1]=v[1]; if (v[2]<min[2]) min[2]=v[2];
+        if (v[0]>max[0]) max[0]=v[0]; if (v[1]>max[1]) max[1]=v[1]; if (v[2]>max[2]) max[2]=v[2];
+      }
+      const c=[(min[0]+max[0])/2,(min[1]+max[1])/2,(min[2]+max[2])/2];
+      const sx=max[0]-min[0], sy=max[1]-min[1], sz=max[2]-min[2];
+      const s = Math.max(sx, sy, sz) || 1;
+      return verts.map(v=>[(v[0]-c[0])*(2/s), (v[1]-c[1])*(2/s), (v[2]-c[2])*(2/s)]);
+    }
+
+    function rotY([x,y,z], a){ const c=Math.cos(a), s=Math.sin(a); return [ c*x + s*z, y, -s*x + c*z ]; }
+    function rotX([x,y,z], a){ const c=Math.cos(a), s=Math.sin(a); return [ x, c*y - s*z, s*y + c*z ]; }
+    function proj([x,y,z]){
+      const f=600/(z+5); // cheap perspective
+      return [ canvas.width/2 + x*f, canvas.height/2 - y*f ];
+    }
+
+    function edgesFromFaces(faces){
+      const set = new Set();
+      const add = (a,b)=>{ const i=a<b?`${a}-${b}`:`${b}-${a}`; set.add(i); };
+      for (const f of faces){ add(f[0],f[1]); add(f[1],f[2]); add(f[2],f[0]); }
+      const edges = [];
+      for (const key of set){ const [a,b]=key.split('-').map(n=>+n); edges.push([a,b]); }
+      return edges;
+    }
+
+    async function main(){
+      let objText='';
+      try{
+        const res = await fetch('/assets/models/teapot.obj', { cache: 'no-cache' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        objText = await res.text();
+      } catch(e){
+        showErr(`Failed to fetch OBJ: ${e.message}\nMake sure the server root is the project root.`);
+        return;
+      }
+
+      let model;
+      try{
+        model = parseOBJ(objText);
+      } catch(e){
+        showErr(`Failed to parse OBJ: ${e.message}`);
+        return;
+      }
+
+      const V = centerAndScale(model.verts);
+      const E = edgesFromFaces(model.faces);
+
+      function draw(t){
+        ctx.fillStyle='#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        const a = t*0.001;
+        const PV = V.map(v => proj(rotX(rotY(v,a*0.7), a*0.4)));
+
+        ctx.strokeStyle='#9ef'; ctx.lineWidth=1; ctx.beginPath();
+        for (const [i,j] of E){ const p=PV[i], q=PV[j]; ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); }
+        ctx.stroke();
+
+        requestAnimationFrame(draw);
+      }
+      requestAnimationFrame(draw);
+    }
+
+    main();
+  </script>
+</body>
+</html>

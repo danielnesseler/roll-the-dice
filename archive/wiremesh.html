@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Wiremesh OBJ Viewer (no libs)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font-family: system-ui, sans-serif; display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  header { padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border-bottom: 1px solid #0003; }
+  label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+  input[type="range"] { width: 120px; }
+  #drop { margin-left: auto; opacity: .8; }
+  main { position: relative; background: #111; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #hint { position: absolute; left: 10px; bottom: 10px; color: #fff9; font: 12px/1.2 system-ui, sans-serif; user-select: none; }
+</style>
+</head>
+<body>
+  <header>
+    <input id="file" type="file" accept=".obj" />
+    <button id="reset">Reset View</button>
+    <label>Line
+      <input id="linewidth" type="range" min="0.5" max="4" step="0.5" value="1.5">
+      <span id="lwVal">1.5</span>px
+    </label>
+    <label>Color
+      <input id="linecolor" type="color" value="#00d5ff">
+    </label>
+    <label>Perspective
+      <input id="persp" type="checkbox" checked>
+    </label>
+    <label>FOV
+      <input id="fov" type="range" min="20" max="110" value="60">
+      <span id="fovVal">60</span>°
+    </label>
+    <label>Scale
+      <input id="scale" type="range" min="0.2" max="4" step="0.01" value="1">
+      <span id="scaleVal">1.00</span>x
+    </label>
+    <span id="drop">Drag & drop an .obj anywhere</span>
+  </header>
+  <main>
+    <canvas id="c"></canvas>
+    <div id="hint">LMB: orbit · Wheel: zoom · Shift+LMB: pan</div>
+  </main>
+
+<script type="module">
+/* ========================= utilities ========================= */
+const DPR = Math.max(1, window.devicePixelRatio || 1);
+const $ = s => document.querySelector(s);
+
+// simple mat/vec helpers
+const mulMatVec = (m, v) => [
+  m[0]*v[0] + m[1]*v[1] + m[2]*v[2],
+  m[3]*v[0] + m[4]*v[1] + m[5]*v[2],
+  m[6]*v[0] + m[7]*v[1] + m[8]*v[2],
+];
+
+const rotY = a => {
+  const c=Math.cos(a), s=Math.sin(a);
+  return [ c,0, s,  0,1,0,  -s,0,c ];
+};
+const rotX = a => {
+  const c=Math.cos(a), s=Math.sin(a);
+  return [ 1,0,0,  0,c,-s,  0,s,c ];
+};
+const mulMat = (A,B) => { // 3x3 * 3x3
+  const out = Array(9);
+  out[0]=A[0]*B[0]+A[1]*B[3]+A[2]*B[6];
+  out[1]=A[0]*B[1]+A[1]*B[4]+A[2]*B[7];
+  out[2]=A[0]*B[2]+A[1]*B[5]+A[2]*B[8];
+  out[3]=A[3]*B[0]+A[4]*B[3]+A[5]*B[6];
+  out[4]=A[3]*B[1]+A[4]*B[4]+A[5]*B[7];
+  out[5]=A[3]*B[2]+A[4]*B[5]+A[5]*B[8];
+  out[6]=A[6]*B[0]+A[7]*B[3]+A[8]*B[6];
+  out[7]=A[6]*B[1]+A[7]*B[4]+A[8]*B[7];
+  out[8]=A[6]*B[2]+A[7]*B[5]+A[8]*B[8];
+  return out;
+};
+
+/* ========================= OBJ parsing =========================
+   Supports: v, f (any polygon). Ignores vt, vn, mtllib, usemtl, etc.
+   Face indices like "f 1/2/3 4/5/6 7/8/9" → we use the first number.
+   Negative indices are handled per OBJ spec (relative to end).
+================================================================= */
+function parseOBJ(text) {
+  const verts = [];
+  const faces = []; // array of arrays of vertex indices (0-based)
+
+  const lines = text.split(/\r?\n/);
+  for (let line of lines) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const parts = line.split(/\s+/);
+    const tag = parts[0];
+
+    if (tag === 'v' && parts.length >= 4) {
+      verts.push([+parts[1], +parts[2], +parts[3]]);
+    } else if (tag === 'f' && parts.length >= 4) {
+      const idxs = parts.slice(1).map(tok => {
+        const i = tok.split('/')[0]; // "a/b/c" -> "a"
+        let n = parseInt(i, 10);
+        if (Number.isNaN(n) || n === 0) return null;
+        if (n < 0) n = verts.length + n + 1; // negative = relative from end
+        return n - 1; // OBJ is 1-based
+      }).filter(i => i != null);
+      if (idxs.length >= 2) faces.push(idxs);
+    }
+  }
+
+  // Build unique edge list from faces
+  const edgeSet = new Set();
+  const edges = [];
+  const addEdge = (a,b) => {
+    if (a === b) return;
+    const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+    if (!edgeSet.has(key)) { edgeSet.add(key); edges.push([a,b]); }
+  };
+
+  for (const f of faces) {
+    for (let i=0; i<f.length; i++) {
+      const a = f[i];
+      const b = f[(i+1)%f.length];
+      addEdge(a,b);
+    }
+  }
+
+  // Center + scale to fit a unit sphere (radius ~1)
+  if (verts.length) {
+    let min=[Infinity,Infinity,Infinity], max=[-Infinity,-Infinity,-Infinity];
+    for (const v of verts) {
+      for (let k=0;k<3;k++){ if(v[k]<min[k]) min[k]=v[k]; if(v[k]>max[k]) max[k]=v[k]; }
+    }
+    const center = [(min[0]+max[0])/2, (min[1]+max[1])/2, (min[2]+max[2])/2];
+    const diag = Math.hypot(max[0]-min[0], max[1]-min[1], max[2]-min[2]) || 1;
+    const s = 2 / diag; // fit roughly into [-1,1]
+    for (const v of verts) {
+      v[0] = (v[0]-center[0])*s;
+      v[1] = (v[1]-center[1])*s;
+      v[2] = (v[2]-center[2])*s;
+    }
+  }
+
+  return { verts, edges };
+}
+
+/* ========================= Viewer state ========================= */
+const canvas = $('#c');
+const ctx = canvas.getContext('2d');
+
+let model = { verts: [], edges: [] };
+
+const state = {
+  yaw: 0,
+  pitch: 0,
+  dist: 3,         // camera distance (z)
+  pan: { x: 0, y: 0 }, // screen-space pan (px)
+  lineWidth: 1.5,
+  color: '#00d5ff',
+  perspective: true,
+  fovDeg: 60,
+  userScale: 1,
+};
+
+function resize() {
+  const { clientWidth: w, clientHeight: h } = canvas;
+  canvas.width = Math.max(1, Math.floor(w * DPR));
+  canvas.height = Math.max(1, Math.floor(h * DPR));
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.scale(DPR, DPR);
+}
+window.addEventListener('resize', resize);
+
+/* ========================= Projection & draw ========================= */
+function projectPoint([x,y,z], w, h) {
+  // Model rotation
+  const R = mulMat(rotY(state.yaw), rotX(state.pitch));
+  const vr = mulMatVec(R, [x*state.userScale, y*state.userScale, z*state.userScale]);
+
+  // Camera at (0,0,dist), looking to origin
+  const zc = vr[2] + state.dist;
+
+  let sx, sy;
+  if (state.perspective) {
+    const fov = state.fovDeg * Math.PI / 180;
+    const f = h / (2 * Math.tan(fov/2)); // focal length in pixels (use height)
+    sx = (vr[0] * f) / zc + w/2 + state.pan.x;
+    sy = (-vr[1] * f) / zc + h/2 + state.pan.y;
+  } else {
+    const s = h * 0.5; // arbitrary ortho scale based on height
+    sx = vr[0] * s + w/2 + state.pan.x;
+    sy = -vr[1] * s + h/2 + state.pan.y;
+  }
+  return { x: sx, y: sy, behind: zc <= 0.001 };
+}
+
+function render() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.clearRect(0,0,w,h);
+
+  ctx.lineWidth = state.lineWidth;
+  ctx.strokeStyle = state.color;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const proj = model.verts.map(v => projectPoint(v, w, h));
+
+  ctx.beginPath();
+  for (const [a,b] of model.edges) {
+    const pa = proj[a], pb = proj[b];
+    // If both points are behind the camera in perspective mode, skip (prevents artifacts)
+    if (state.perspective && pa.behind && pb.behind) continue;
+
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+  }
+  ctx.stroke();
+}
+
+/* ========================= Interaction ========================= */
+let dragging = false;
+let last = { x: 0, y: 0 };
+let mode = 'orbit'; // orbit | pan (Shift)
+
+canvas.addEventListener('mousedown', (e) => {
+  dragging = true;
+  mode = e.shiftKey ? 'pan' : 'orbit';
+  last.x = e.clientX; last.y = e.clientY;
+});
+window.addEventListener('mouseup', () => dragging = false);
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - last.x;
+  const dy = e.clientY - last.y;
+  last.x = e.clientX; last.y = e.clientY;
+
+  if (mode === 'orbit') {
+    state.yaw += dx * 0.01;
+    state.pitch += dy * 0.01;
+    state.pitch = Math.max(-Math.PI/2 + 0.001, Math.min(Math.PI/2 - 0.001, state.pitch));
+  } else {
+    state.pan.x += dx;
+    state.pan.y += dy;
+  }
+  render();
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  // zoom by changing camera distance (closer = larger)
+  const factor = Math.exp(-e.deltaY * 0.001);
+  state.dist = Math.max(0.2, Math.min(50, state.dist * factor));
+  render();
+}, { passive: false });
+
+/* ========================= File / drop ========================= */
+function loadOBJText(text) {
+  model = parseOBJ(text);
+  // Reset view
+  state.yaw = 0; state.pitch = 0; state.dist = 3; state.pan.x = 0; state.pan.y = 0; state.userScale = 1;
+  render();
+}
+
+$('#file').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const text = await f.text();
+  loadOBJText(text);
+});
+
+window.addEventListener('dragover', (e)=>{ e.preventDefault(); });
+window.addEventListener('drop', async (e)=>{
+  e.preventDefault();
+  const f = [...(e.dataTransfer?.files||[])].find(f=>/\.obj$/i.test(f.name));
+  if (!f) return;
+  const text = await f.text();
+  loadOBJText(text);
+});
+
+/* ========================= UI controls ========================= */
+const lw = $('#linewidth'), lwVal = $('#lwVal');
+lw.addEventListener('input', ()=>{ state.lineWidth = +lw.value; lwVal.textContent = lw.value; render(); });
+
+const lc = $('#linecolor');
+lc.addEventListener('input', ()=>{ state.color = lc.value; render(); });
+
+const persp = $('#persp');
+persp.addEventListener('change', ()=>{ state.perspective = persp.checked; render(); });
+
+const fov = $('#fov'), fovVal = $('#fovVal');
+fov.addEventListener('input', ()=>{ state.fovDeg = +fov.value; fovVal.textContent = fov.value; render(); });
+
+const sc = $('#scale'), scVal = $('#scaleVal');
+sc.addEventListener('input', ()=>{ state.userScale = +sc.value; scVal.textContent = (+sc.value).toFixed(2); render(); });
+
+$('#reset').addEventListener('click', ()=>{
+  state.yaw=0; state.pitch=0; state.dist=3; state.pan.x=0; state.pan.y=0; state.userScale=1;
+  sc.value='1'; scVal.textContent='1.00';
+  render();
+});
+
+/* ========================= boot ========================= */
+function fitCanvasToParent() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  resize();
+}
+const onResize = () => { fitCanvasToParent(); render(); };
+window.addEventListener('resize', onResize);
+fitCanvasToParent();
+render();
+
+/* --------- Optional: load a tiny built-in cube so you see something -------- */
+const defaultOBJ = `
+# unit cube
+v -0.5 -0.5 -0.5
+v  0.5 -0.5 -0.5
+v  0.5  0.5 -0.5
+v -0.5  0.5 -0.5
+v -0.5 -0.5  0.5
+v  0.5 -0.5  0.5
+v  0.5  0.5  0.5
+v -0.5  0.5  0.5
+f 1 2 3 4
+f 5 6 7 8
+f 1 2 6 5
+f 2 3 7 6
+f 3 4 8 7
+f 4 1 5 8
+`.trim();
+loadOBJText(defaultOBJ);
+</script>
+</body>
+</html>
