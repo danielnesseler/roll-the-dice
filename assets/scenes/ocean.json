@@ -1,0 +1,31 @@
+{
+  "name": "Ocean Depths",
+  "description": "Deep sea atmosphere with cool blues",
+  "background": {
+    "type": "gradient",
+    "colors": ["#1e3a5f", "#0f2847", "#051833"],
+    "direction": "vertical"
+  },
+  "lighting": {
+    "ambient": [0.2, 0.3, 0.4],
+    "directional": {
+      "direction": [0.3, 0.7, 0.5],
+      "color": [0.6, 0.8, 1.0],
+      "intensity": 0.7
+    }
+  },
+  "palette": {
+    "mode": "ocean",
+    "colors": ["#2e5266", "#4682b4", "#5f9ea0", "#008b8b", "#20b2aa", "#48d1cc", "#87ceeb", "#b0e0e6"],
+    "hue": 200,
+    "saturation": 70,
+    "lightness": 50
+  },
+  "atmosphere": {
+    "fog": {
+      "enabled": true,
+      "color": [0.1, 0.2, 0.3],
+      "density": 0.03
+    }
+  }
+}

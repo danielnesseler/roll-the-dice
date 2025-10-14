@@ -1,0 +1,31 @@
+{
+  "name": "Sunset Sky",
+  "description": "Warm sunset atmosphere with golden hues",
+  "background": {
+    "type": "gradient",
+    "colors": ["#ff6b35", "#f7931e", "#ffdc00", "#ff8c42"],
+    "direction": "diagonal"
+  },
+  "lighting": {
+    "ambient": [0.4, 0.3, 0.2],
+    "directional": {
+      "direction": [0.8, 0.6, 0.3],
+      "color": [1.0, 0.9, 0.7],
+      "intensity": 0.9
+    }
+  },
+  "palette": {
+    "mode": "sunset",
+    "colors": ["#ff6b35", "#f7931e", "#ffdc00", "#ff8c42", "#c73e1d", "#a0522d", "#cd853f", "#daa520"],
+    "hue": 30,
+    "saturation": 80,
+    "lightness": 55
+  },
+  "atmosphere": {
+    "fog": {
+      "enabled": false,
+      "color": [0.3, 0.2, 0.1],
+      "density": 0.01
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "Forest Scene",
+  "description": "Woodland atmosphere with earth tones",
+  "background": {
+    "type": "gradient",
+    "colors": ["#2d4a2b", "#1a2e1a", "#0f1b0f"],
+    "direction": "vertical"
+  },
+  "lighting": {
+    "ambient": [0.3, 0.4, 0.3],
+    "directional": {
+      "direction": [0.5, 0.8, 0.6],
+      "color": [0.9, 0.85, 0.7],
+      "intensity": 0.8
+    }
+  },
+  "palette": {
+    "mode": "forest",
+    "colors": ["#4a5c2a", "#7d8c3a", "#a3b54a", "#6b4e23", "#8b6914", "#cd853f", "#2e4019", "#4f6b2c"],
+    "hue": 90,
+    "saturation": 60,
+    "lightness": 45
+  },
+  "atmosphere": {
+    "fog": {
+      "enabled": true,
+      "color": [0.2, 0.3, 0.2],
+      "density": 0.02
+    }
+  }
+}
