@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Uniform Waves + Spirals + Drawing Pad</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0e1014; color: #eaecef;
+    }
+    aside {
+      padding: 14px;
+      background: #12141b;
+      border-right: 1px solid #0006;
+      overflow: auto;
+    }
+    main { display: grid; place-items: center; }
+    canvas#view {
+      background: #0f1117;
+      width: min(96vw, 1600px);
+      height: auto;
+      border-radius: 14px;
+      box-shadow: 0 14px 48px #000a;
+      touch-action: none;
+    }
+    h2 { font-size: 12px; letter-spacing:.08em; text-transform: uppercase; opacity:.85; margin: 16px 0 8px; }
+    .group { padding: 10px; border: 1px solid #ffffff18; border-radius: 10px; background: #0f1117; margin-bottom: 10px; }
+    .row { display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; margin:8px 0; }
+    .row input[type="range"] { width: 100%; }
+    .two { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+    .swatches { display:flex; gap:4px; flex-wrap:wrap; }
+    .swatch { width:18px; height:18px; border-radius:4px; border: 1px solid #0006; }
+    button { cursor: pointer; }
+    small.note { font-size:12px; opacity:.75; line-height:1.35; display:block; }
+    .padWrap { background:#0a0c10; border:1px solid #ffffff18; border-radius:10px; padding:10px; }
+    canvas#pad {
+      display:block; width:256px; height:256px; image-rendering: pixelated;
+      background:#0d0f14; border-radius: 8px; box-shadow: inset 0 0 0 1px #0008;
+      cursor: crosshair;
+    }
+    .kbd { padding:0 6px; border:1px solid #fff2; border-radius:4px; font-size:12px; background:#1116; }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="group">
+      <h2>Canvas</h2>
+      <div class="row"><label>Width</label><input id="W" type="number" min="400" max="4000" value="1400"></div>
+      <div class="row"><label>Height</label><input id="H" type="number" min="300" max="3000" value="900"></div>
+      <div class="row"><label>Background</label><input id="bg" type="color" value="#0f1117"></div>
+      <div class="two"><button id="resize">Resize</button><button id="save">Save PNG</button></div>
+    </div>
+
+    <div class="group">
+      <h2>Palette</h2>
+      <div class="row"><label>Mode</label>
+        <select id="palMode">
+          <option value="triadic" selected>triadic</option>
+          <option value="analogous">analogous</option>
+          <option value="complement">complement</option>
+          <option value="mono">mono</option>
+          <option value="random">random</option>
+        </select>
+      </div>
+      <div class="row"><label>Hue seed (°)</label><input id="hueSeed" type="range" min="0" max="359" value="20"><span id="hueSeedV">20</span></div>
+      <div class="row"><label>Sat %</label><input id="sat" type="range" min="0" max="100" value="70"><span id="satV">70</span></div>
+      <div class="row"><label>Light %</label><input id="lit" type="range" min="0" max="100" value="55"><span id="litV">55</span></div>
+      <div class="row"><label>Palette size</label><input id="palSize" type="range" min="3" max="12" value="6"><span id="palSizeV">6</span></div>
+      <div class="swatches" id="swatches"></div>
+      <div class="row"><label>Seed</label><input id="seed" type="number" value="1234567"><button id="dice">🎲</button></div>
+    </div>
+
+    <div class="group">
+      <h2>Placement (Uniform Jittered Grid)</h2>
+      <div class="row"><label>Spacing (px)</label><input id="spacing" type="range" min="20" max="260" value="120"><span id="spacingV">120</span></div>
+      <div class="row"><label>Jitter (px)</label><input id="jitter" type="range" min="0" max="120" value="36"><span id="jitterV">36</span></div>
+      <div class="row"><label>Rotation jitter (°)</label><input id="rotJit" type="range" min="0" max="180" value="25"><span id="rotJitV">25</span></div>
+      <div class="row"><label>Per-cell color</label>
+        <select id="colorMode">
+          <option value="cycle" selected>cycle palette</option>
+          <option value="random">random from palette</option>
+          <option value="fixed">fixed (first swatch)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>Shape Family</h2>
+      <div class="row"><label>Type</label>
+        <select id="shapeType">
+          <option value="wave" selected>Wavelet (sine)</option>
+          <option value="spiral">Spiral (arc)</option>
+          <option value="sketch">Your sketch</option>
+        </select>
+      </div>
+
+      <!-- waves -->
+      <div class="row"><label>Wave length (px)</label><input id="wLen" type="range" min="20" max="400" value="160"><span id="wLenV">160</span></div>
+      <div class="row"><label>Amplitude (px)</label><input id="wAmp" type="range" min="2" max="120" value="26"><span id="wAmpV">26</span></div>
+      <div class="row"><label>Cycles</label><input id="wCycles" type="range" min="0.25" max="4" step="0.25" value="1.5"><span id="wCyclesV">1.5</span></div>
+      <div class="row"><label>Thickness</label><input id="wThick" type="range" min="1" max="24" value="7"><span id="wThickV">7</span></div>
+
+      <!-- spirals -->
+      <div class="row"><label>Spiral radius (px)</label><input id="sRad" type="range" min="10" max="200" value="60"><span id="sRadV">60</span></div>
+      <div class="row"><label>Turns</label><input id="sTurns" type="range" min="0.5" max="5" step="0.5" value="2"><span id="sTurnsV">2.0</span></div>
+      <div class="row"><label>Spiral thick</label><input id="sThick" type="range" min="1" max="24" value="6"><span id="sThickV">6</span></div>
+    </div>
+
+    <div class="group">
+      <h2>Drawing Pad</h2>
+      <div class="padWrap">
+        <canvas id="pad" width="256" height="256"></canvas>
+      </div>
+      <div class="two" style="margin-top:8px;">
+        <button id="clearPad">Clear</button>
+        <button id="addSketch">Add Shape</button>
+      </div>
+      <div class="row"><label>Brush size</label><input id="brush" type="range" min="1" max="36" value="8"><span id="brushV">8</span></div>
+      <div class="row"><label>Brush color</label><input id="brushColor" type="color" value="#ffffff"></div>
+      <div class="row"><label class="inline"><input id="wrapStrokes" type="checkbox" checked> Seamless wrap</label><span></span></div>
+      <small class="note">Draw on the pad, then press <span class="kbd">Enter</span> (or “Add Shape”) to use it as the repeated symbol.</small>
+    </div>
+
+    <div class="two">
+      <button id="regenerate">Regenerate</button>
+      <button id="randomize">Randomize Seed</button>
+    </div>
+  </aside>
+
+  <main>
+    <canvas id="view" width="1400" height="900"></canvas>
+  </main>
+
+  <script>
+    // ---------- utilities ----------
+    const $ = s => document.querySelector(s);
+    const normHue = h => ((h%360)+360)%360;
+    function mulberry32(a){ return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+    const randRange = (r, a, b)=> a + r()*(b-a);
+
+    // ---------- DOM ----------
+    const view = $('#view'), vctx = view.getContext('2d');
+    const pad  = $('#pad'),  pctx = pad.getContext('2d');
+
+    const ui = {
+      W: $('#W'), H: $('#H'), bg: $('#bg'), resize: $('#resize'), save: $('#save'),
+      palMode: $('#palMode'), hueSeed: $('#hueSeed'), hueSeedV: $('#hueSeedV'),
+      sat: $('#sat'), satV: $('#satV'), lit: $('#lit'), litV: $('#litV'),
+      palSize: $('#palSize'), palSizeV: $('#palSizeV'), swatches: $('#swatches'),
+      seed: $('#seed'), dice: $('#dice'),
+
+      spacing: $('#spacing'), spacingV: $('#spacingV'),
+      jitter: $('#jitter'), jitterV: $('#jitterV'),
+      rotJit: $('#rotJit'), rotJitV: $('#rotJitV'),
+      colorMode: $('#colorMode'),
+
+      shapeType: $('#shapeType'),
+      wLen: $('#wLen'), wLenV: $('#wLenV'),
+      wAmp: $('#wAmp'), wAmpV: $('#wAmpV'),
+      wCycles: $('#wCycles'), wCyclesV: $('#wCyclesV'),
+      wThick: $('#wThick'), wThickV: $('#wThickV'),
+
+      sRad: $('#sRad'), sRadV: $('#sRadV'),
+      sTurns: $('#sTurns'), sTurnsV: $('#sTurnsV'),
+      sThick: $('#sThick'), sThickV: $('#sThickV'),
+
+      clearPad: $('#clearPad'), addSketch: $('#addSketch'),
+      brush: $('#brush'), brushV: $('#brushV'),
+      brushColor: $('#brushColor'), wrapStrokes: $('#wrapStrokes'),
+
+      regenerate: $('#regenerate'), randomize: $('#randomize')
+    };
+
+    // ---------- palette ----------
+    function hslToHex(h,s,l){
+      l/=100; const a=(s*Math.min(l,1-l))/100;
+      const f=n=>{ const k=(n+h/30)%12; const c=l-a*Math.max(Math.min(k-3,9-k,1),-1); return Math.round(255*c).toString(16).padStart(2,'0'); };
+      return `#${f(0)}${f(8)}${f(4)}`;
+    }
+    function buildPalette(mode, size, hueSeed, sat, lit, rng){
+      if (mode==='random'){
+        return Array.from({length:size}, ()=> hslToHex(Math.floor(randRange(rng,0,360)), sat, lit));
+      }
+      let offsets=[];
+      if (mode==='triadic') offsets=[0,120,240];
+      else if (mode==='analogous') offsets=[-60,-30,0,30,60];
+      else if (mode==='complement') offsets=[0,180];
+      else if (mode==='mono') offsets=[0];
+      const hues = Array.from({length:size}, (_,i)=> normHue(hueSeed + offsets[i % offsets.length]));
+      return hues.map(h=> hslToHex(h, sat, lit));
+    }
+    function showSwatches(hexes){
+      ui.swatches.innerHTML = '';
+      for (const h of hexes){
+        const d = document.createElement('div');
+        d.className='swatch'; d.style.background = h; ui.swatches.appendChild(d);
+      }
+    }
+
+    // ---------- drawing pad (seamless lines) ----------
+    pctx.lineCap='round'; pctx.lineJoin='round';
+    let drawing=false, last=null, currentSketchComposited=null; // cached image for fast stamping
+
+    function lineWrapped(x0,y0,x1,y1,color,thick){
+      const W=pad.width, H=pad.height;
+      const offs = [[0,0],[W,0],[-W,0],[0,H],[0,-H],[W,H],[-W,H],[W,-H],[-W,-H]];
+      pctx.strokeStyle = color;
+      pctx.lineWidth = thick;
+      for (const [ox,oy] of offs){
+        pctx.beginPath();
+        pctx.moveTo(x0+ox,y0+oy);
+        pctx.lineTo(x1+ox,y1+oy);
+        pctx.stroke();
+      }
+    }
+
+    function pointerToPad(e){
+      const r = pad.getBoundingClientRect();
+      return [
+        (e.clientX - r.left) * (pad.width/r.width),
+        (e.clientY - r.top ) * (pad.height/r.height)
+      ];
+    }
+
+    pad.addEventListener('pointerdown', e=>{
+      drawing=true; pad.setPointerCapture(e.pointerId);
+      last = pointerToPad(e);
+    });
+    window.addEventListener('pointerup', ()=>{ drawing=false; last=null; });
+    pad.addEventListener('pointermove', e=>{
+      if (!drawing) return;
+      const [x,y] = pointerToPad(e);
+      if (ui.wrapStrokes.checked) lineWrapped(last[0],last[1],x,y, ui.brushColor.value, +ui.brush.value);
+      else {
+        pctx.strokeStyle = ui.brushColor.value; pctx.lineWidth = +ui.brush.value;
+        pctx.beginPath(); pctx.moveTo(last[0],last[1]); pctx.lineTo(x,y); pctx.stroke();
+      }
+      last=[x,y];
+      currentSketchComposited = null; // invalidate cache
+    });
+
+    ui.clearPad.addEventListener('click', ()=>{
+      pctx.clearRect(0,0,pad.width,pad.height);
+      currentSketchComposited = null;
+      render();
+    });
+    ui.addSketch.addEventListener('click', ()=>{ addSketchSymbol(); render(); });
+    window.addEventListener('keydown', (e)=>{ if (e.key==='Enter'){ addSketchSymbol(); render(); } });
+
+    ui.brush.addEventListener('input', ()=> ui.brushV.textContent = ui.brush.value);
+
+    // prepare a trimmed, non-empty bitmap of the sketch for quicker drawImage
+    function getSketchBitmap(){
+      // cache if already built
+      if (currentSketchComposited) return currentSketchComposited;
+      const img = pctx.getImageData(0,0,pad.width,pad.height);
+      const d=img.data;
+      let minX=pad.width, minY=pad.height, maxX=-1, maxY=-1;
+      for (let y=0;y<pad.height;y++){
+        for (let x=0;x<pad.width;x++){
+          const i=(y*pad.width+x)*4;
+          if (d[i+3]>5){ // non-transparent
+            if (x<minX) minX=x; if (x>maxX) maxX=x;
+            if (y<minY) minY=y; if (y>maxY) maxY=y;
+          }
+        }
+      }
+      if (maxX<minX || maxY<minY){
+        return null; // empty
+      }
+      const w=maxX-minX+1, h=maxY-minY+1;
+      const off = document.createElement('canvas');
+      off.width=w; off.height=h;
+      off.getContext('2d').putImageData(pctx.getImageData(minX,minY,w,h),0,0);
+      currentSketchComposited = {canvas: off, w, h};
+      return currentSketchComposited;
+    }
+
+    let customSymbol = null; // {canvas, w, h}
+
+    function addSketchSymbol(){
+      const bmp = getSketchBitmap();
+      if (!bmp){ alert('Sketch is empty. Draw on the pad first.'); return; }
+      customSymbol = bmp;
+      // also switch to "sketch" type for convenience
+      ui.shapeType.value = 'sketch';
+    }
+
+    // ---------- shape renderers ----------
+    function pickColor(palette, idx, mode, rng){
+      if (mode==='fixed') return palette[0];
+      if (mode==='random') return palette[Math.floor(randRange(rng,0,palette.length))|0];
+      // cycle
+      return palette[idx % palette.length];
+    }
+
+    function drawWave(ctx, cx, cy, angle, color, len, amp, cycles, thick){
+      const pts = 64;
+      ctx.save();
+      ctx.translate(cx,cy);
+      ctx.rotate(angle);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = thick;
+      ctx.lineCap='round';
+      ctx.beginPath();
+      for (let i=0;i<=pts;i++){
+        const t = i/pts;           // 0..1 along length
+        const x = (t-0.5)*len;     // centered
+        const y = Math.sin(t*cycles*2*Math.PI) * amp * (0.85 + 0.15*Math.cos(t*2*Math.PI)); // slight taper wobble
+        if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawSpiral(ctx, cx, cy, angle, color, radius, turns, thick){
+      const pts = 140;
+      ctx.save();
+      ctx.translate(cx,cy);
+      ctx.rotate(angle);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = thick;
+      ctx.lineCap='round';
+      ctx.beginPath();
+      for (let i=0;i<=pts;i++){
+        const t = i/pts;           // 0..1 along spiral
+        const r = radius * t;      // Archimedean
+        const a = t * turns * 2*Math.PI;
+        const x = r * Math.cos(a);
+        const y = r * Math.sin(a);
+        if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawSketch(ctx, cx, cy, angle, color, size, thick){
+      if (!customSymbol) return; // nothing to draw
+      const {canvas:wBmp, w, h} = customSymbol;
+      // draw sketch tinted to desired color via multiply trick on temp canvas
+      const off = document.createElement('canvas');
+      off.width=w; off.height=h;
+      const octx = off.getContext('2d');
+      octx.drawImage(wBmp,0,0);
+      // tint: source-atop fill with chosen color
+      octx.globalCompositeOperation = 'source-atop';
+      octx.fillStyle = color;
+      octx.fillRect(0,0,w,h);
+
+      // scale to "size" on longer side
+      const scale = size / Math.max(w,h);
+      const dw = w*scale, dh = h*scale;
+
+      ctx.save();
+      ctx.translate(cx,cy);
+      ctx.rotate(angle);
+      ctx.drawImage(off, -dw/2, -dh/2, dw, dh);
+      ctx.restore();
+    }
+
+    // ---------- render pipeline ----------
+    let palette = [];
+    function rebuildPalette(rng){
+      palette = buildPalette(ui.palMode.value, +ui.palSize.value, +ui.hueSeed.value, +ui.sat.value, +ui.lit.value, rng);
+      showSwatches(palette);
+    }
+    function syncReadouts(){
+      ui.hueSeedV.textContent = ui.hueSeed.value;
+      ui.satV.textContent = ui.sat.value;
+      ui.litV.textContent = ui.lit.value;
+      ui.palSizeV.textContent = ui.palSize.value;
+      ui.spacingV.textContent = ui.spacing.value;
+      ui.jitterV.textContent  = ui.jitter.value;
+      ui.rotJitV.textContent  = ui.rotJit.value;
+      ui.wLenV.textContent    = ui.wLen.value;
+      ui.wAmpV.textContent    = ui.wAmp.value;
+      ui.wCyclesV.textContent = ui.wCycles.value;
+      ui.wThickV.textContent  = ui.wThick.value;
+      ui.sRadV.textContent    = ui.sRad.value;
+      ui.sTurnsV.textContent  = (+ui.sTurns.value).toFixed(1);
+      ui.sThickV.textContent  = ui.sThick.value;
+      ui.brushV.textContent   = ui.brush.value;
+    }
+
+    function render(){
+      syncReadouts();
+      const rng = mulberry32((+ui.seed.value|0)>>>0);
+
+      // palette and background
+      rebuildPalette(rng);
+      vctx.setTransform(1,0,0,1,0,0);
+      vctx.fillStyle = ui.bg.value;
+      vctx.fillRect(0,0,view.width,view.height);
+
+      // placement grid
+      const spacing = +ui.spacing.value;
+      const jitter  = +ui.jitter.value;
+      const rotJit  = (+ui.rotJit.value) * Math.PI/180;
+      const cols = Math.ceil(view.width/spacing);
+      const rows = Math.ceil(view.height/spacing);
+
+      // shape params
+      const shape = ui.shapeType.value;
+      const colorMode = ui.colorMode.value;
+
+      const wLen   = +ui.wLen.value;
+      const wAmp   = +ui.wAmp.value;
+      const wCycles= +ui.wCycles.value;
+      const wThick = +ui.wThick.value;
+
+      const sRad   = +ui.sRad.value;
+      const sTurns = +ui.sTurns.value;
+      const sThick = +ui.sThick.value;
+
+      let idx=0;
+      for (let j=0;j<=rows;j++){
+        for (let i=0;i<=cols;i++){
+          const baseX = i*spacing, baseY = j*spacing;
+          const x = baseX + randRange(rng, -jitter, jitter);
+          const y = baseY + randRange(rng, -jitter, jitter);
+          const a = randRange(rng, -rotJit, rotJit);
+          const color = pickColor(palette, idx++, colorMode, rng);
+
+          if (shape==='wave'){
+            drawWave(vctx, x,y, a, color, wLen, wAmp, wCycles, wThick);
+          } else if (shape==='spiral'){
+            drawSpiral(vctx, x,y, a, color, sRad, sTurns, sThick);
+          } else {
+            // sketch: size tied to spacing a bit
+            const size = Math.min(spacing*0.9, Math.max(32, spacing*0.7));
+            drawSketch(vctx, x,y, a, color, size, 6);
+          }
+        }
+      }
+    }
+
+    // ---------- UI wiring ----------
+    ;['palMode','hueSeed','sat','lit','palSize','seed','spacing','jitter','rotJit','shapeType',
+      'wLen','wAmp','wCycles','wThick','sRad','sTurns','sThick','bg','colorMode']
+      .forEach(id => $('#'+id).addEventListener('input', render));
+
+    ui.randomize.addEventListener('click', ()=>{ ui.seed.value = Math.floor(Math.random()*1e9); render(); });
+    ui.dice.addEventListener('click', ()=>{ ui.seed.value = Math.floor(Math.random()*1e9); render(); });
+
+    ui.resize.addEventListener('click', ()=>{
+      view.width  = +ui.W.value;
+      view.height = +ui.H.value;
+      render();
+    });
+    ui.save.addEventListener('click', ()=>{
+      const a=document.createElement('a');
+      a.download = `uniform_shapes_${Date.now()}.png`;
+      a.href = view.toDataURL('image/png');
+      a.click();
+    });
+
+    // high-DPI fit (without blur)
+    const DPR = Math.min(2, window.devicePixelRatio||1);
+    function fitCanvas(){
+      const rect = view.getBoundingClientRect();
+      const w = Math.round(rect.width * DPR);
+      const h = Math.round(rect.height * DPR);
+      if (view.width!==w || view.height!==h){
+        view.width=w; view.height=h;
+        vctx.setTransform(DPR,0,0,DPR,0,0);
+        render();
+      }
+    }
+    window.addEventListener('resize', fitCanvas);
+
+    // init
+    (function init(){
+      view.width  = +ui.W.value;
+      view.height = +ui.H.value;
+      fitCanvas();
+      render();
+    })();
+  </script>
+</body>
+</html>

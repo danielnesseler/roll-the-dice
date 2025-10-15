@@ -1,0 +1,60 @@
+{
+  "name": "Desert Landscape",
+  "description": "3D rendered desert with dunes and rock formations",
+  "type": "landscape",
+  "background": {
+    "skyColor": [0.9, 0.7, 0.4],
+    "horizonColor": [1.0, 0.8, 0.5],
+    "groundColor": [0.8, 0.6, 0.3]
+  },
+  "terrain": [
+    {
+      "name": "sand_dune_1",
+      "type": "sphere",
+      "radius": 4,
+      "position": [-10, -3, -8],
+      "color": [0.9, 0.8, 0.6],
+      "subdivisions": 20
+    },
+    {
+      "name": "sand_dune_2",
+      "type": "sphere",
+      "radius": 3,
+      "position": [8, -3.5, -12],
+      "color": [0.85, 0.75, 0.55],
+      "subdivisions": 20
+    },
+    {
+      "name": "rock_formation_1",
+      "type": "cube",
+      "size": [2, 3, 1.5],
+      "position": [-3, -1, -6],
+      "color": [0.6, 0.4, 0.3],
+      "subdivisions": 8
+    },
+    {
+      "name": "rock_formation_2",
+      "type": "cube",
+      "size": [1.5, 2, 1],
+      "position": [4, -1.5, -7],
+      "color": [0.5, 0.35, 0.25],
+      "subdivisions": 8
+    },
+    {
+      "name": "desert_floor",
+      "type": "plane",
+      "size": [25, 25],
+      "position": [0, -4, 0],
+      "color": [0.8, 0.7, 0.5],
+      "subdivisions": 40
+    }
+  ],
+  "lighting": {
+    "sunDirection": [0.8, 0.6, 0.2],
+    "sunColor": [1.0, 0.9, 0.6],
+    "ambient": [0.4, 0.35, 0.3]
+  },
+  "camera": {
+    "backgroundDistance": 18
+  }
+}

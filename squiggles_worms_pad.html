@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Squiggles + Worms + Drawing Pad</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0e1014; color: #eaecef;
+    }
+    aside {
+      padding: 14px;
+      background: #12141b;
+      border-right: 1px solid #0006;
+      overflow: auto;
+    }
+    main { display: grid; place-items: center; }
+    canvas {
+      background: #0f1117;
+      width: min(96vw, 1600px);
+      height: auto;
+      border-radius: 14px;
+      box-shadow: 0 14px 48px #000a;
+      touch-action: none;
+      cursor: crosshair;
+    }
+    h2 { font-size: 12px; letter-spacing:.08em; text-transform: uppercase; opacity:.85; margin: 16px 0 8px; }
+    .group { padding: 10px; border: 1px solid #ffffff18; border-radius: 10px; background: #0f1117; margin-bottom: 10px; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin: 8px 0; }
+    .row input[type="range"] { width: 100%; }
+    .two { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+    .swatches { display:flex; gap:4px; flex-wrap:wrap; }
+    .swatch { width:18px; height:18px; border-radius:4px; border: 1px solid #0006; }
+    small { opacity:.75; display:block; margin-top:6px; line-height:1.35; }
+    button { cursor: pointer; }
+    label.inline { display:flex; align-items:center; gap:8px; }
+    .kbd { padding:0 6px; border:1px solid #fff2; border-radius:4px; font-size:12px; background:#1116; }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="group">
+      <h2>Canvas</h2>
+      <div class="row"><label>Width</label><input id="W" type="number" min="400" max="4000" value="1400"></div>
+      <div class="row"><label>Height</label><input id="H" type="number" min="300" max="3000" value="900"></div>
+      <div class="row"><label>Background</label><input id="bg" type="color" value="#0f1117"></div>
+      <div class="two"><button id="resize">Resize</button><button id="save">Save PNG</button></div>
+    </div>
+
+    <div class="group">
+      <h2>Palette</h2>
+      <div class="row"><label>Mode</label>
+        <select id="palMode">
+          <option value="random">random HSL</option>
+          <option value="triadic" selected>triadic</option>
+          <option value="analogous">analogous</option>
+          <option value="complement">complement</option>
+          <option value="mono">mono</option>
+        </select>
+      </div>
+      <div class="row"><label>Hue seed (°)</label><input id="hueSeed" type="range" min="0" max="359" value="30"><span id="hueSeedV">30</span></div>
+      <div class="row"><label>Sat %</label><input id="sat" type="range" min="0" max="100" value="70"><span id="satV">70</span></div>
+      <div class="row"><label>Light %</label><input id="lit" type="range" min="0" max="100" value="55"><span id="litV">55</span></div>
+      <div class="row"><label>Palette size</label><input id="palSize" type="range" min="3" max="12" value="6"><span id="palSizeV">6</span></div>
+      <div id="swatches" class="swatches"></div>
+      <div class="row"><label>Seed</label><input id="seed" type="number" value="1234567"><button id="dice">🎲</button></div>
+    </div>
+
+    <div class="group">
+      <h2>Worms</h2>
+      <div class="row"><label>Count</label><input id="wCount" type="range" min="0" max="600" value="150"><span id="wCountV">150</span></div>
+      <div class="row"><label>Length</label><input id="wLen" type="range" min="10" max="800" value="240"><span id="wLenV">240</span></div>
+      <div class="row"><label>Thickness</label><input id="wThick" type="range" min="1" max="24" value="6"><span id="wThickV">6</span></div>
+      <div class="row"><label>Curvature</label><input id="wCurve" type="range" min="0" max="1" step="0.01" value="0.25"><span id="wCurveV">0.25</span></div>
+      <div class="row"><label>Opacity</label><input id="wAlpha" type="range" min="0.05" max="1" step="0.01" value="0.85"><span id="wAlphaV">0.85</span></div>
+    </div>
+
+    <div class="group">
+      <h2>Squiggles</h2>
+      <div class="row"><label>Count</label><input id="sCount" type="range" min="0" max="600" value="120"><span id="sCountV">120</span></div>
+      <div class="row"><label>Length</label><input id="sLen" type="range" min="10" max="1000" value="300"><span id="sLenV">300</span></div>
+      <div class="row"><label>Thickness</label><input id="sThick" type="range" min="1" max="16" value="3"><span id="sThickV">3</span></div>
+      <div class="row"><label>Wobble</label><input id="sWobble" type="range" min="0" max="2" step="0.01" value="0.6"><span id="sWobbleV">0.60</span></div>
+      <div class="row"><label>Opacity</label><input id="sAlpha" type="range" min="0.05" max="1" step="0.01" value="0.7"><span id="sAlphaV">0.70</span></div>
+    </div>
+
+    <div class="group">
+      <h2>Drawing Pad</h2>
+      <div class="row"><label>Mode</label>
+        <select id="drawMode">
+          <option value="worm">as worm</option>
+          <option value="squiggle" selected>as squiggle</option>
+          <option value="blob">as filled blob</option>
+        </select>
+      </div>
+      <div class="row"><label>Thickness</label><input id="dThick" type="range" min="1" max="30" value="8"><span id="dThickV">8</span></div>
+      <div class="row"><label>Color index</label><input id="dColorIdx" type="range" min="0" max="11" value="0"><span id="dColorIdxV">0</span></div>
+      <div class="two"><button id="addShape">Add Shape</button><button id="clearSketch">Clear Sketch</button></div>
+      <small>Click & drag on canvas to sketch. Press <span class="kbd">Enter</span> to “Add Shape”. Press <span class="kbd">Esc</span> to clear current sketch.</small>
+    </div>
+
+    <div class="two">
+      <button id="regenerate">Regenerate</button>
+      <button id="saveAll">Save (Everything)</button>
+    </div>
+  </aside>
+
+  <main>
+    <canvas id="c" width="1400" height="900"></canvas>
+  </main>
+
+  <script>
+    // ---------- utilities ----------
+    const $ = s => document.querySelector(s);
+    const canvas = $('#c');
+    const ctx = canvas.getContext('2d');
+
+    // seeded RNG (Mulberry32)
+    function mulberry32(a){
+      return function(){
+        let t = a += 0x6D2B79F5;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    const normHue = h => ((h%360)+360)%360;
+    const randRange = (r, a, b)=> a + r()*(b-a);
+
+    // ---------- palette ----------
+    function hslToHex(h,s,l){
+      l/=100; const a=(s*Math.min(l,1-l))/100;
+      const f=n=>{ const k=(n+h/30)%12; const c=l-a*Math.max(Math.min(k-3,9-k,1),-1); return Math.round(255*c).toString(16).padStart(2,'0'); };
+      return `#${f(0)}${f(8)}${f(4)}`;
+    }
+    function buildPalette(mode, size, hueSeed, sat, lit){
+      if (mode==='random'){
+        const rng = mulberry32( (hueSeed|0) + 1337 );
+        return Array.from({length:size}, ()=> hslToHex(Math.floor(randRange(rng,0,360)), sat, lit));
+      }
+      let offsets=[];
+      if (mode==='triadic') offsets=[0,120,240];
+      else if (mode==='analogous') offsets=[-60,-30,0,30,60];
+      else if (mode==='complement') offsets=[0,180];
+      else if (mode==='mono') offsets=[0];
+      const hues = Array.from({length:size}, (_,i)=> normHue(hueSeed + offsets[i % offsets.length]));
+      return hues.map(h=> hslToHex(h, sat, lit));
+    }
+    function showSwatches(hexes){
+      const box = $('#swatches'); box.innerHTML = '';
+      for (const h of hexes){
+        const d = document.createElement('div');
+        d.className='swatch'; d.style.background = h; box.appendChild(d);
+      }
+    }
+
+    // ---------- worms & squiggles ----------
+    function drawPolylineSmooth(ctx, pts){
+      if (pts.length<2) return;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i=1;i<pts.length-1;i++){
+        const a = pts[i], b = pts[i+1];
+        const mx = (a.x + b.x)/2, my = (a.y + b.y)/2;
+        ctx.quadraticCurveTo(a.x, a.y, mx, my);
+      }
+      // last segment
+      const pen = pts[pts.length-1];
+      ctx.lineTo(pen.x, pen.y);
+      ctx.stroke();
+    }
+
+    function generateWorm(rng, W,H, length, curvature, step=3){
+      // random start
+      let x = randRange(rng, 0, W), y = randRange(rng, 0, H);
+      let ang = randRange(rng, 0, Math.PI*2);
+      const pts = [{x,y}];
+      const L = Math.max(2, length|0);
+      for (let i=0;i<L;i++){
+        ang += (rng()-0.5) * curvature * 0.8;  // curvature controls turning
+        x += Math.cos(ang)*step;
+        y += Math.sin(ang)*step;
+
+        // bounce from borders
+        if (x<0){ x=0; ang=Math.PI-ang; }
+        if (x>W){ x=W; ang=Math.PI-ang; }
+        if (y<0){ y=0; ang=-ang; }
+        if (y>H){ y=H; ang=-ang; }
+
+        pts.push({x,y});
+      }
+      return pts;
+    }
+
+    function drawWorm(ctx, pts, color, thickness, alpha){
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = thickness;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      drawPolylineSmooth(ctx, pts);
+      ctx.restore();
+    }
+
+    function generateSquiggle(rng, W,H, length, wobble, baseStep=4){
+      let x = randRange(rng, 0, W), y = randRange(rng, 0, H);
+      let a = randRange(rng, 0, Math.PI*2);
+      const pts = [{x,y}];
+      const L = Math.max(2, length|0);
+      for (let i=0;i<L;i++){
+        // slightly more sinusoidal drift
+        const jitter = (rng()-0.5) * wobble;
+        a += jitter + Math.sin(i*0.12)*wobble*0.1;
+        const step = baseStep * (0.7 + 0.6*rng());
+        x += Math.cos(a)*step;
+        y += Math.sin(a)*step;
+        if (x<0) x=0; if (x>W) x=W; if (y<0) y=0; if (y>H) y=H;
+        pts.push({x,y});
+      }
+      return pts;
+    }
+
+    function drawSquiggle(ctx, pts, color, thickness, alpha){
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = thickness;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      drawPolylineSmooth(ctx, pts);
+      ctx.restore();
+    }
+
+    // turn a polyline into a filled blob by thickening & closing
+    function drawBlob(ctx, pts, color){
+      if (pts.length<2) return;
+      const off = 10; // simple thickness
+      // crude “stroke to fill” by drawing a fat stroke and then compositing to fill
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color + 'cc';
+      ctx.lineWidth = off*2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ---------- drawing pad ----------
+    let sketch = [];         // current in-progress points
+    const shapes = [];       // committed shapes: {type:'worm'|'squiggle'|'blob', pts, color, thickness, alpha}
+    function screenToCanvas(e){
+      const r = canvas.getBoundingClientRect();
+      const x = (e.clientX - r.left) * (canvas.width / r.width);
+      const y = (e.clientY - r.top)  * (canvas.height / r.height);
+      return {x,y};
+    }
+    let drawing = false;
+    canvas.addEventListener('pointerdown', e=>{
+      drawing = true; canvas.setPointerCapture(e.pointerId);
+      sketch = [screenToCanvas(e)];
+      render();
+    });
+    canvas.addEventListener('pointermove', e=>{
+      if (!drawing) return;
+      sketch.push(screenToCanvas(e));
+      // draw lightweight overlay
+      render();
+      ctx.save();
+      ctx.strokeStyle = activeColor();
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = +$('#dThick').value;
+      ctx.lineCap='round'; ctx.lineJoin='round';
+      drawPolylineSmooth(ctx, sketch);
+      ctx.restore();
+    });
+    canvas.addEventListener('pointerup', e=>{
+      drawing = false;
+      render();
+    });
+    window.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter'){
+        commitSketch();
+      } else if (e.key === 'Escape'){
+        sketch = []; render();
+      }
+    });
+
+    function activeColor(){
+      const idx = Math.min(palette.length-1, +$('#dColorIdx').value|0);
+      return palette[idx] || '#fff';
+    }
+
+    function commitSketch(){
+      if (sketch.length<2) return;
+      const mode = $('#drawMode').value;
+      const thick = +$('#dThick').value;
+      const color = activeColor();
+      const alpha = 0.9;
+
+      if (mode==='blob'){
+        shapes.push({ type:'blob', pts: sketch.slice(), color, thickness: thick, alpha });
+      } else if (mode==='worm'){
+        // resample sketch as worm-ish polyline (use as-is)
+        shapes.push({ type:'worm', pts: sketch.slice(), color, thickness: thick, alpha });
+      } else {
+        shapes.push({ type:'squiggle', pts: sketch.slice(), color, thickness: thick, alpha });
+      }
+      sketch = [];
+      render();
+    }
+
+    $('#addShape').addEventListener('click', commitSketch);
+    $('#clearSketch').addEventListener('click', ()=>{ sketch=[]; render(); });
+
+    // ---------- UI ----------
+    const ui = {
+      W: $('#W'), H: $('#H'), bg: $('#bg'), resize: $('#resize'), save: $('#save'), saveAll: $('#saveAll'),
+
+      palMode: $('#palMode'), hueSeed: $('#hueSeed'), hueSeedV: $('#hueSeedV'),
+      sat: $('#sat'), satV: $('#satV'), lit: $('#lit'), litV: $('#litV'),
+      palSize: $('#palSize'), palSizeV: $('#palSizeV'),
+      seed: $('#seed'), dice: $('#dice'),
+
+      wCount: $('#wCount'), wCountV: $('#wCountV'),
+      wLen: $('#wLen'), wLenV: $('#wLenV'),
+      wThick: $('#wThick'), wThickV: $('#wThickV'),
+      wCurve: $('#wCurve'), wCurveV: $('#wCurveV'),
+      wAlpha: $('#wAlpha'), wAlphaV: $('#wAlphaV'),
+
+      sCount: $('#sCount'), sCountV: $('#sCountV'),
+      sLen: $('#sLen'), sLenV: $('#sLenV'),
+      sThick: $('#sThick'), sThickV: $('#sThickV'),
+      sWobble: $('#sWobble'), sWobbleV: $('#sWobbleV'),
+      sAlpha: $('#sAlpha'), sAlphaV: $('#sAlphaV'),
+
+      drawMode: $('#drawMode'),
+      dThick: $('#dThick'), dThickV: $('#dThickV'),
+      dColorIdx: $('#dColorIdx'), dColorIdxV: $('#dColorIdxV'),
+
+      regenerate: $('#regenerate')
+    };
+
+    function syncReadouts(){
+      ui.hueSeedV.textContent = ui.hueSeed.value;
+      ui.satV.textContent = ui.sat.value;
+      ui.litV.textContent = ui.lit.value;
+      ui.palSizeV.textContent = ui.palSize.value;
+      ui.wCountV.textContent = ui.wCount.value;
+      ui.wLenV.textContent = ui.wLen.value;
+      ui.wThickV.textContent = ui.wThick.value;
+      ui.wCurveV.textContent = Number(ui.wCurve.value).toFixed(2);
+      ui.wAlphaV.textContent = Number(ui.wAlpha.value).toFixed(2);
+      ui.sCountV.textContent = ui.sCount.value;
+      ui.sLenV.textContent = ui.sLen.value;
+      ui.sThickV.textContent = ui.sThick.value;
+      ui.sWobbleV.textContent = Number(ui.sWobble.value).toFixed(2);
+      ui.sAlphaV.textContent = Number(ui.sAlpha.value).toFixed(2);
+      ui.dThickV.textContent = ui.dThick.value;
+      ui.dColorIdxV.textContent = ui.dColorIdx.value;
+    }
+
+    // ---------- state & render ----------
+    let palette = [];
+    function rebuildPalette(){
+      palette = buildPalette(ui.palMode.value, +ui.palSize.value, +ui.hueSeed.value, +ui.sat.value, +ui.lit.value);
+      showSwatches(palette);
+    }
+
+    function renderBackground(){
+      ctx.fillStyle = ui.bg.value;
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+
+    function render(){
+      syncReadouts();
+      renderBackground();
+
+      const rng = mulberry32( (+ui.seed.value|0)>>>0 );
+
+      // worms
+      for (let i=0;i<+ui.wCount.value;i++){
+        const pts = generateWorm(
+          rng, canvas.width, canvas.height,
+          +ui.wLen.value, +ui.wCurve.value, 3
+        );
+        const col = palette[i % palette.length];
+        drawWorm(ctx, pts, col, +ui.wThick.value, +ui.wAlpha.value);
+      }
+
+      // squiggles
+      for (let i=0;i<+ui.sCount.value;i++){
+        const pts = generateSquiggle(
+          rng, canvas.width, canvas.height,
+          +ui.sLen.value, +ui.sWobble.value, 4
+        );
+        const col = palette[(i*3+1) % palette.length];
+        drawSquiggle(ctx, pts, col, +ui.sThick.value, +ui.sAlpha.value);
+      }
+
+      // committed user shapes
+      for (const sh of shapes){
+        if (sh.type==='worm') drawWorm(ctx, sh.pts, sh.color, sh.thickness, sh.alpha);
+        else if (sh.type==='squiggle') drawSquiggle(ctx, sh.pts, sh.color, sh.thickness, sh.alpha);
+        else drawBlob(ctx, sh.pts, sh.color);
+      }
+
+      // live sketch overlay (lightweight)
+      if (sketch.length>1){
+        ctx.save();
+        ctx.strokeStyle = activeColor();
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = +ui.dThick.value;
+        ctx.lineCap='round'; ctx.lineJoin='round';
+        drawPolylineSmooth(ctx, sketch);
+        ctx.restore();
+      }
+    }
+
+    // ---------- events ----------
+    ['palMode','hueSeed','sat','lit','palSize'].forEach(id=>{
+      $('#'+id).addEventListener('input', ()=>{ syncReadouts(); rebuildPalette(); render(); });
+    });
+    ['wCount','wLen','wThick','wCurve','wAlpha','sCount','sLen','sThick','sWobble','sAlpha','dThick','dColorIdx','bg']
+      .forEach(id=> $('#'+id).addEventListener('input', render));
+
+    ui.resize.addEventListener('click', ()=>{
+      canvas.width  = +ui.W.value;
+      canvas.height = +ui.H.value;
+      render();
+    });
+    ui.save.addEventListener('click', ()=>{
+      const a = document.createElement('a');
+      a.download = 'squiggles_worms.png';
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    });
+    ui.saveAll.addEventListener('click', ()=>{
+      const a = document.createElement('a');
+      a.download = `squiggles_worms_${Date.now()}.png`;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    });
+    ui.dice.addEventListener('click', ()=>{
+      ui.seed.value = Math.floor(Math.random()*1e9);
+      render();
+    });
+    ui.regenerate.addEventListener('click', render);
+
+    // ---------- init ----------
+    (function init(){
+      canvas.width  = +ui.W.value;
+      canvas.height = +ui.H.value;
+      rebuildPalette();
+      syncReadouts();
+      render();
+    })();
+  </script>
+</body>
+</html>

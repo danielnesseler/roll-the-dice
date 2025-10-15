@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Draw-Your-Tile Tessellation Lab</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      height: 100vh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0d0f12;
+      color: #eaecef;
+    }
+    aside {
+      padding: 14px;
+      border-right: 1px solid #0006;
+      background: #111319;
+      overflow: auto;
+    }
+    main { display: grid; place-items: center; }
+    canvas#view {
+      width: min(96vw, 1600px);
+      height: auto;
+      background: #121317;
+      border-radius: 12px;
+      box-shadow: 0 12px 48px #000a;
+    }
+    h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; opacity:.85; margin: 16px 0 8px; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin: 8px 0; }
+    .row > *:last-child { justify-self: end; }
+    .grid { display: grid; gap: 8px; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .group { padding: 10px; border: 1px solid #ffffff18; border-radius: 10px; background: #0f1117; }
+    button { cursor: pointer; }
+    .note { font-size: 12px; opacity:.75; line-height:1.4; }
+    .padWrap {
+      background:#0a0c10; border:1px solid #ffffff18; border-radius:10px; padding:10px;
+    }
+    canvas#pad {
+      display:block; width:256px; height:256px; image-rendering: pixelated;
+      background: #0d0f14; border-radius: 8px; box-shadow: inset 0 0 0 1px #0008;
+      cursor: crosshair;
+    }
+    label small { opacity:.7; font-size:12px; }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="grid">
+      <div class="group">
+        <h2>1) Draw your tile</h2>
+        <div class="padWrap">
+          <canvas id="pad" width="256" height="256" title="Draw here"></canvas>
+        </div>
+        <div class="two" style="margin-top:8px;">
+          <button id="clear">Clear</button>
+          <button id="noise">Noise</button>
+        </div>
+        <div class="row"><label>Brush size</label><input id="brush" type="range" min="1" max="40" value="10"><span id="brushV">10</span></div>
+        <div class="row"><label>Brush color</label><input id="color" type="color" value="#ffffff"></div>
+        <div class="row"><label>Edge guides</label><input id="guides" type="checkbox" checked></div>
+        <p class="note">Seamless: strokes wrap across edges automatically. Try drawing across borders.</p>
+      </div>
+
+      <div class="group">
+        <h2>2) Tiling</h2>
+        <div class="row">
+          <label for="grid">Grid type</label>
+          <select id="grid">
+            <option value="squares" selected>Squares (periodic)</option>
+            <option value="triangles">Triangles (periodic)</option>
+            <option value="hexagons">Hexagons (periodic)</option>
+          </select>
+        </div>
+        <div class="row"><label>Cell size (px)</label><input id="cell" type="range" min="16" max="220" value="120"><span id="cellV">120</span></div>
+        <div class="row"><label>Stroke</label>
+          <select id="stroke">
+            <option value="none">none</option>
+            <option value="hair" selected>hairline</option>
+            <option value="bold">bold</option>
+          </select>
+        </div>
+        <div class="row"><label>Background</label><input id="bg" type="color" value="#121317"></div>
+      </div>
+
+      <div class="group">
+        <h2>3) Color variation</h2>
+        <div class="row"><label>Random tint</label><input id="tint" type="range" min="0" max="100" value="20"><span id="tintV">20%</span></div>
+        <div class="row"><label>Seed</label><input id="seed" type="number" step="1" value="1234567"><button id="dice">🎲</button></div>
+        <p class="note">Each cell is your tile; optional random hue tint per cell (seeded for repeatability).</p>
+      </div>
+
+      <div class="two">
+        <button id="regenerate">Regenerate</button>
+        <button id="save">Save PNG</button>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <canvas id="view" width="1400" height="900"></canvas>
+  </main>
+
+  <script type="module">
+    // ---------- tiny seeded RNG ----------
+    function mulberry32(a){ return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+    const randInt = (r, lo, hi)=> Math.floor(r()*(hi-lo+1))+lo;
+
+    // ---------- DOM ----------
+    const $ = s => document.querySelector(s);
+    const pad = $('#pad');
+    const pctx = pad.getContext('2d');
+    const view = $('#view');
+    const vctx = view.getContext('2d');
+
+    const ui = {
+      clear: $('#clear'), noise: $('#noise'),
+      brush: $('#brush'), brushV: $('#brushV'), color: $('#color'), guides: $('#guides'),
+      grid: $('#grid'), cell: $('#cell'), cellV: $('#cellV'), stroke: $('#stroke'), bg: $('#bg'),
+      tint: $('#tint'), tintV: $('#tintV'), seed: $('#seed'), dice: $('#dice'),
+      regen: $('#regenerate'), save: $('#save')
+    };
+
+    // ---------- pad setup ----------
+    // init pad background transparent; drawing is white by default
+    pctx.lineCap = 'round';
+    pctx.lineJoin = 'round';
+
+    function drawGuides(){
+      if (!ui.guides.checked) return;
+      pctx.save();
+      pctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      pctx.lineWidth = 1;
+      // border
+      pctx.strokeRect(0.5,0.5,pad.width-1,pad.height-1);
+      // cross
+      pctx.beginPath();
+      pctx.moveTo(pad.width/2, 0); pctx.lineTo(pad.width/2, pad.height);
+      pctx.moveTo(0, pad.height/2); pctx.lineTo(pad.width, pad.height/2);
+      pctx.stroke();
+      pctx.restore();
+    }
+    function padRedrawGuides(){
+      // redraw guides on top by copying content then drawing guides
+      const img = pctx.getImageData(0,0,pad.width,pad.height);
+      pctx.clearRect(0,0,pad.width,pad.height);
+      pctx.putImageData(img,0,0);
+      drawGuides();
+    }
+    drawGuides();
+
+    // seamless stroke drawing (wrap across edges)
+    let drawing = false;
+    let last = null;
+
+    function lineWrapped(x0,y0,x1,y1){
+      const W = pad.width, H = pad.height;
+      const offsets = [
+        [0,0],[W,0],[-W,0],[0,H],[0,-H],[W,H],[-W,H],[W,-H],[-W,-H]
+      ];
+      pctx.strokeStyle = ui.color.value;
+      pctx.lineWidth = +ui.brush.value;
+
+      for (const [ox,oy] of offsets){
+        pctx.beginPath();
+        pctx.moveTo(x0+ox, y0+oy);
+        pctx.lineTo(x1+ox, y1+oy);
+        pctx.stroke();
+      }
+    }
+
+    pad.addEventListener('pointerdown', e=>{
+      const r = pad.getBoundingClientRect();
+      drawing = true;
+      last = [ (e.clientX - r.left) * (pad.width/r.width),
+               (e.clientY - r.top ) * (pad.height/r.height) ];
+    });
+    window.addEventListener('pointerup', ()=> drawing=false);
+    pad.addEventListener('pointermove', e=>{
+      if (!drawing) return;
+      const r = pad.getBoundingClientRect();
+      const x = (e.clientX - r.left) * (pad.width/r.width);
+      const y = (e.clientY - r.top ) * (pad.height/r.height);
+      lineWrapped(last[0], last[1], x, y);
+      last = [x,y];
+      padRedrawGuides();
+      draw(); // live update
+    });
+
+    ui.brush.addEventListener('input', ()=> ui.brushV.textContent = ui.brush.value);
+    ui.guides.addEventListener('change', padRedrawGuides);
+
+    ui.clear.addEventListener('click', ()=>{
+      pctx.clearRect(0,0,pad.width,pad.height);
+      drawGuides();
+      draw();
+    });
+
+    ui.noise.addEventListener('click', ()=>{
+      const seed = (+ui.seed.value)|0;
+      const R = mulberry32(seed);
+      const img = pctx.createImageData(pad.width, pad.height);
+      const d = img.data;
+      for (let i=0;i<d.length;i+=4){
+        const v = randInt(R, 0, 255);
+        d[i]=d[i+1]=d[i+2]=v; d[i+3]= 80; // faint texture
+      }
+      pctx.putImageData(img,0,0); padRedrawGuides(); draw();
+    });
+
+    // ---------- tiling render ----------
+    function hslToRgb(h, s, l){
+      s/=100; l/=100;
+      const k = n => (n + h/30) % 12;
+      const a = s * Math.min(l, 1 - l);
+      const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+      return [Math.round(255*f(0)), Math.round(255*f(8)), Math.round(255*f(4))];
+    }
+
+    function applyTint(drawFn, rng, strengthPct){
+      if (strengthPct<=0){ drawFn(); return; }
+      // tint with random hue via 'color' blend
+      const strength = strengthPct/100;
+      drawFn();
+      const h = randInt(rng, 0, 359);
+      const s = 80, l = 55;
+      const [r,g,b] = hslToRgb(h,s,l);
+      vctx.save();
+      vctx.globalAlpha = strength;
+      vctx.globalCompositeOperation = 'color'; // hue/sat tint
+      vctx.fillStyle = `rgb(${r},${g},${b})`;
+      vctx.fillRect(0,0,view.width,view.height);
+      vctx.restore();
+    }
+
+    function drawSquares(rng, cell, stroke, tint){
+      // use createPattern for true repetition
+      vctx.save();
+      vctx.fillStyle = ui.bg.value;
+      vctx.fillRect(0,0,view.width,view.height);
+      vctx.restore();
+
+      // build a pattern cell the requested size from pad
+      const off = document.createElement('canvas');
+      off.width = cell; off.height = cell;
+      const octx = off.getContext('2d');
+      octx.imageSmoothingEnabled = true;
+      octx.drawImage(pad, 0,0, cell, cell);
+
+      const pat = vctx.createPattern(off, 'repeat');
+      vctx.save();
+      vctx.fillStyle = pat;
+      vctx.fillRect(0,0,view.width,view.height);
+      vctx.restore();
+
+      // (optional) per-cell tint: simulate by a big overlay chopped into a grid
+      if (tint>0){
+        const cols = Math.ceil(view.width/cell), rows = Math.ceil(view.height/cell);
+        for (let j=0;j<rows;j++){
+          for (let i=0;i<cols;i++){
+            const h = randInt(rng, 0, 359);
+            const [r,g,b] = hslToRgb(h,80,55);
+            vctx.save();
+            vctx.globalAlpha = tint/100;
+            vctx.globalCompositeOperation = 'color';
+            vctx.fillStyle = `rgb(${r},${g},${b})`;
+            vctx.fillRect(i*cell, j*cell, cell, cell);
+            vctx.restore();
+          }
+        }
+      }
+
+      // strokes
+      if (stroke!=='none'){
+        vctx.save();
+        vctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        vctx.lineWidth = (stroke==='bold') ? 1.25 : 0.5;
+        for (let x=0; x<=view.width; x+=cell){ vctx.beginPath(); vctx.moveTo(x,0); vctx.lineTo(x,view.height); vctx.stroke(); }
+        for (let y=0; y<=view.height; y+=cell){ vctx.beginPath(); vctx.moveTo(0,y); vctx.lineTo(view.width,y); vctx.stroke(); }
+        vctx.restore();
+      }
+    }
+
+    function drawTriangles(rng, cell, stroke, tint){
+      vctx.save();
+      vctx.fillStyle = ui.bg.value;
+      vctx.fillRect(0,0,view.width,view.height);
+      vctx.restore();
+
+      const h = cell * Math.sqrt(3)/2;
+      for(let row=0, y=0; y<view.height + h; row++, y += h){
+        const offset = (row%2) ? cell/2 : 0;
+        for(let x=-cell; x<view.width+cell; x+=cell){
+          // triangle up
+          vctx.save();
+          vctx.beginPath();
+          vctx.moveTo(x+offset, y);
+          vctx.lineTo(x+offset+cell/2, y+h);
+          vctx.lineTo(x+offset-cell/2, y+h);
+          vctx.closePath();
+          vctx.clip();
+          // draw tile scaled into bounding box
+          const bx = x+offset-cell/2, by = y, bw = cell, bh = h;
+          vctx.drawImage(pad, bx, by, bw, bh);
+          vctx.restore();
+
+          // triangle down
+          vctx.save();
+          vctx.beginPath();
+          vctx.moveTo(x+offset, y+2*h);
+          vctx.lineTo(x+offset+cell/2, y+h);
+          vctx.lineTo(x+offset-cell/2, y+h);
+          vctx.closePath();
+          vctx.clip();
+          // flip the tile for variety
+          vctx.translate(x+offset, y+h);
+          vctx.rotate(Math.PI);
+          vctx.drawImage(pad, -cell/2, -h, cell, h);
+          vctx.restore();
+
+          if (tint>0){
+            // tint each triangle separately
+            for (let k=0;k<2;k++){
+              vctx.save();
+              vctx.beginPath();
+              if (k===0){
+                vctx.moveTo(x+offset, y);
+                vctx.lineTo(x+offset+cell/2, y+h);
+                vctx.lineTo(x+offset-cell/2, y+h);
+              } else {
+                vctx.moveTo(x+offset, y+2*h);
+                vctx.lineTo(x+offset+cell/2, y+h);
+                vctx.lineTo(x+offset-cell/2, y+h);
+              }
+              vctx.closePath();
+              vctx.clip();
+              const hh = randInt(rng, 0, 359);
+              const [r,g,b] = hslToRgb(hh,80,55);
+              vctx.globalAlpha = tint/100;
+              vctx.globalCompositeOperation = 'color';
+              vctx.fillStyle = `rgb(${r},${g},${b})`;
+              vctx.fillRect(x+offset-cell, y, 2*cell, 2*h);
+              vctx.restore();
+            }
+          }
+        }
+      }
+
+      if (stroke!=='none'){
+        vctx.save();
+        vctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        vctx.lineWidth = (stroke==='bold') ? 1.25 : 0.5;
+        // draw edges again (cheap way: draw paths again)
+        const hh = h;
+        for(let row=0, y=0; y<view.height + hh; row++, y += hh){
+          const offset = (row%2) ? cell/2 : 0;
+          for(let x=-cell; x<view.width+cell; x+=cell){
+            vctx.beginPath();
+            vctx.moveTo(x+offset, y);
+            vctx.lineTo(x+offset+cell/2, y+hh);
+            vctx.lineTo(x+offset-cell/2, y+hh);
+            vctx.closePath(); vctx.stroke();
+
+            vctx.beginPath();
+            vctx.moveTo(x+offset, y+2*hh);
+            vctx.lineTo(x+offset+cell/2, y+hh);
+            vctx.lineTo(x+offset-cell/2, y+hh);
+            vctx.closePath(); vctx.stroke();
+          }
+        }
+        vctx.restore();
+      }
+    }
+
+    function drawHexagons(rng, cell, stroke, tint){
+      vctx.save();
+      vctx.fillStyle = ui.bg.value;
+      vctx.fillRect(0,0,view.width,view.height);
+      vctx.restore();
+
+      // flat-topped hex; cell is flat-to-flat width
+      const s = cell/2;              // side
+      const h = Math.sqrt(3)*s;      // corner-to-corner height
+      const stepX = 1.5*s;
+      const stepY = h;
+
+      function hexPath(cx, cy){
+        vctx.beginPath();
+        vctx.moveTo(cx - s/2, cy - h/2);
+        vctx.lineTo(cx + s/2, cy - h/2);
+        vctx.lineTo(cx + s,   cy);
+        vctx.lineTo(cx + s/2, cy + h/2);
+        vctx.lineTo(cx - s/2, cy + h/2);
+        vctx.lineTo(cx - s,   cy);
+        vctx.closePath();
+      }
+
+      for(let row=0, y=0; y<view.height+stepY; row++, y+=stepY){
+        const offsetX = (row%2) ? 0.75*cell : 0;
+        for(let x=-cell; x<view.width+cell; x+= stepX*2){
+          const cx = x + offsetX;
+
+          vctx.save();
+          hexPath(cx, y);
+          vctx.clip();
+
+          // draw the tile stretched to hex's bounding box
+          const bx = cx - s, by = y - h/2, bw = 2*s, bh = h;
+          vctx.drawImage(pad, bx, by, bw, bh);
+
+          // tint per hex
+          if (tint>0){
+            const hh = randInt(rng, 0, 359);
+            const [r,g,b] = hslToRgb(hh,80,55);
+            vctx.globalAlpha = tint/100;
+            vctx.globalCompositeOperation = 'color';
+            vctx.fillStyle = `rgb(${r},${g},${b})`;
+            vctx.fillRect(bx,by,bw,bh);
+          }
+
+          vctx.restore();
+
+          if (stroke!=='none'){
+            vctx.save();
+            vctx.lineWidth = (stroke==='bold') ? 1.25 : 0.5;
+            vctx.strokeStyle = 'rgba(0,0,0,0.5)';
+            hexPath(cx,y);
+            vctx.stroke();
+            vctx.restore();
+          }
+        }
+      }
+    }
+
+    function draw(){
+      ui.cellV.textContent = ui.cell.value;
+      ui.tintV.textContent = ui.tint.value + '%';
+
+      const rng = mulberry32((+ui.seed.value|0)>>>0);
+      const cell = +ui.cell.value;
+      const stroke = (ui.stroke.value==='hair') ? 'hair' :
+                     (ui.stroke.value==='bold') ? 'bold' : 'none';
+      const tint = +ui.tint.value;
+
+      if (ui.grid.value==='squares'){
+        drawSquares(rng, cell, stroke, tint);
+      } else if (ui.grid.value==='triangles'){
+        drawTriangles(rng, cell, stroke, tint);
+      } else {
+        drawHexagons(rng, cell, stroke, tint);
+      }
+    }
+
+    // ---------- UI wiring ----------
+    ['grid','cell','stroke','bg','tint','seed'].forEach(id=>{
+      $( '#'+id ).addEventListener('input', ()=>{
+        if (id==='bg'){
+          // repaint background immediately
+        }
+        draw();
+      });
+    });
+    ui.dice.addEventListener('click', ()=>{ ui.seed.value = Math.floor(Math.random()*1e9); draw(); });
+    ui.regen.addEventListener('click', draw);
+    ui.save.addEventListener('click', ()=>{
+      const a = document.createElement('a');
+      a.download = `tessellation_${ui.grid.value}.png`;
+      a.href = view.toDataURL('image/png');
+      a.click();
+    });
+
+    // initial paint
+    draw();
+
+    // keep canvas sharp on resize
+    const DPR = Math.min(2, window.devicePixelRatio||1);
+    function fitCanvas(){
+      const rect = view.getBoundingClientRect();
+      const w = Math.round(rect.width * DPR);
+      const h = Math.round(rect.height * DPR);
+      if (view.width!==w || view.height!==h){
+        view.width=w; view.height=h;
+        vctx.scale(DPR, DPR); // Scale context for high DPI
+        draw();
+      }
+    }
+    
+    // Initial setup - ensure canvas is properly sized before first draw
+    window.addEventListener('resize', fitCanvas);
+    requestAnimationFrame(() => {
+      fitCanvas();
+      // Force initial draw after canvas is ready
+      setTimeout(draw, 100);
+    });
+  </script>
+</body>
+</html>

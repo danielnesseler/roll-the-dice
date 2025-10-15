@@ -1,0 +1,33 @@
+{
+  "name": "Wiremesh Background",
+  "description": "Dark background with cyan wireframe aesthetic",
+  "background": {
+    "type": "solid",
+    "color": [0.02, 0.02, 0.05]
+  },
+  "wireframes": {
+    "enabled": true,
+    "color": [0.0, 0.8, 1.0],
+    "width": 1.5,
+    "opacity": 0.8
+  },
+  "palette": {
+    "mode": "wireframe",
+    "colors": ["#00d5ff", "#0099cc", "#007acc", "#005999", "#003d66", "#002e4d", "#001f33", "#00141a"],
+    "hue": 195,
+    "saturation": 100,
+    "lightness": 50
+  },
+  "effects": {
+    "scanlines": {
+      "enabled": true,
+      "intensity": 0.1,
+      "frequency": 0.002
+    },
+    "glow": {
+      "enabled": true,
+      "intensity": 0.3,
+      "radius": 2.0
+    }
+  }
+}

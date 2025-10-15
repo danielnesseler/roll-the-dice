@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Positive/Negative Space Lab — Multi-Image, Smooth Threshold, Drag/Scale/Rotate</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background:#0f1117; color:#eaecef;
+  }
+  aside { background:#12141b; border-right:1px solid #0006; padding:14px; overflow:auto; }
+  main  { display:grid; place-items:center; }
+  canvas#view {
+    width:min(96vw, 1800px);
+    height:auto;
+    background:#0b0d12;
+    border-radius:14px;
+    box-shadow:0 14px 48px #000a;
+    touch-action:none; /* for pointer events */
+  }
+  h2 { font-size:12px; letter-spacing:.08em; text-transform:uppercase; opacity:.85; margin:16px 0 8px; }
+  .group { background:#0f1117; border:1px solid #ffffff18; border-radius:10px; padding:10px; margin-bottom:10px; }
+  .row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; margin:8px 0; }
+  .row input[type="range"], .row input[type="number"], .row select { width:100%; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .drop {
+    border:1px dashed #ffffff33; border-radius:10px; padding:12px; text-align:center; background:#0b0e14;
+  }
+  .drop.drag { background:#101420; border-color:#7aa2f7; }
+  button { cursor:pointer; }
+  .layers { display:grid; gap:6px; }
+  .layer {
+    display:grid; grid-template-columns: 1fr auto; gap:8px;
+    padding:8px; border:1px solid #ffffff12; border-radius:8px; background:#0e131a;
+    align-items:center;
+  }
+  .layer.active { outline:2px solid #7aa2f7; }
+  .layer .name { font-size:13px; opacity:.9; }
+  .layer .mini {
+    display:flex; gap:6px; align-items:center;
+  }
+  .layer button { font-size:12px; padding:4px 6px; }
+  .hint {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; color:#9aa1b2; opacity:.75; text-align:center; padding:20px;
+  }
+  .swatches { display:flex; gap:6px; }
+  .sw { width:18px; height:18px; border-radius:4px; border:1px solid #0006; }
+</style>
+</head>
+<body>
+  <aside>
+    <div class="group">
+      <h2>Load Images</h2>
+      <div class="drop" id="drop">Drop images here or <label style="color:#7aa2f7; text-decoration:underline; cursor:pointer;"><input id="picker" type="file" accept="image/*" multiple hidden>browse</label></div>
+      <div class="row"><label>Canvas width</label><input id="W" type="number" min="400" max="4000" value="1400"></div>
+      <div class="row"><label>Canvas height</label><input id="H" type="number" min="300" max="3000" value="900"></div>
+      <div class="row"><label>Background</label><input id="bg" type="color" value="#0b0d12"></div>
+      <div class="two"><button id="resize">Resize</button><button id="save">Save PNG</button></div>
+      <p style="font-size:12px; opacity:.8; margin-top:6px;">
+        Drag on canvas to move selected image. Mouse wheel = scale. Shift + wheel = rotate.
+      </p>
+    </div>
+
+    <div class="group">
+      <h2>Positive / Negative</h2>
+      <div class="row"><label>Threshold</label><input id="thresh" type="range" min="0" max="100" value="50"><span id="threshV">50%</span></div>
+      <div class="row"><label>Smooth σ</label><input id="sigma" type="range" min="0" max="20" step="0.5" value="6"><span id="sigmaV">6.0</span></div>
+      <div class="row"><label>Positive color</label><input id="pos" type="color" value="#ffffff"></div>
+      <div class="row"><label>Negative color</label><input id="neg" type="color" value="#000000"></div>
+      <div class="swatches"><div class="sw" id="swPos" style="background:#fff"></div><div class="sw" id="swNeg" style="background:#000"></div></div>
+      <p style="font-size:12px; opacity:.8">These are **global**—applied to all layers. (Per-layer is easy to add later.)</p>
+    </div>
+
+    <div class="group">
+      <h2>Layers</h2>
+      <div class="layers" id="layers"></div>
+    </div>
+  </aside>
+
+  <main>
+    <div style="position:relative;">
+      <canvas id="view" width="1400" height="900"></canvas>
+      <div class="hint" id="hint">Drop or load images to begin. Then drag to move, wheel to scale, Shift+wheel to rotate.</div>
+    </div>
+  </main>
+
+<script>
+/* ===== Utilities ===== */
+const $ = s => document.querySelector(s);
+const clamp = (v, lo, hi)=> Math.min(hi, Math.max(lo, v));
+const toRGBA = (hex) => {
+  const h = hex.replace('#','');
+  const v = parseInt(h.length===3
+    ? h.split('').map(c=>c+c).join('')
+    : h, 16);
+  return { r:(v>>16)&255, g:(v>>8)&255, b:v&255, a:255 };
+};
+
+/* ===== Gaussian blur (1D separable) ===== */
+function gaussianKernel1D(sigma){
+  if (sigma<=0) return {k:new Float32Array([1]), r:0};
+  const r = Math.max(1, Math.floor(sigma*3));
+  const size = r*2+1;
+  const k = new Float32Array(size);
+  const s2 = 2*sigma*sigma; let sum=0;
+  for (let i=-r,j=0;i<=r;i++,j++){ const val=Math.exp(-(i*i)/s2); k[j]=val; sum+=val; }
+  for (let j=0;j<size;j++) k[j]/=sum;
+  return {k,r};
+}
+function blur1DHorizontal(src,w,h,{k,r}){
+  if (r===0) return src.slice(0);
+  const out=new Float32Array(src.length);
+  for(let y=0;y<h;y++){
+    const row=y*w;
+    for(let x=0;x<w;x++){
+      let acc=0;
+      for(let i=-r;i<=r;i++){
+        const xx=Math.min(w-1,Math.max(0,x+i));
+        acc+=src[row+xx]*k[i+r];
+      }
+      out[row+x]=acc;
+    }
+  }
+  return out;
+}
+function blur1DVertical(src,w,h,{k,r}){
+  if (r===0) return src.slice(0);
+  const out=new Float32Array(src.length);
+  for(let x=0;x<w;x++){
+    for(let y=0;y<h;y++){
+      let acc=0;
+      for(let i=-r;i<=r;i++){
+        const yy=Math.min(h-1,Math.max(0,y+i));
+        acc+=src[yy*w+x]*k[i+r];
+      }
+      out[y*w+x]=acc;
+    }
+  }
+  return out;
+}
+
+/* ===== Global UI refs ===== */
+const view = $('#view'), ctx = view.getContext('2d');
+const ui = {
+  drop: $('#drop'), picker: $('#picker'),
+  W: $('#W'), H: $('#H'), bg: $('#bg'), resize: $('#resize'), save: $('#save'),
+  thresh: $('#thresh'), threshV: $('#threshV'),
+  sigma: $('#sigma'), sigmaV: $('#sigmaV'),
+  pos: $('#pos'), neg: $('#neg'),
+  swPos: $('#swPos'), swNeg: $('#swNeg'),
+  layers: $('#layers'), hint: $('#hint'),
+};
+
+/* ===== Layer state =====
+ layer = {
+   id, name, img, w, h,
+   x, y, scale, rot (rad),
+   opacity (0..1), visible (bool),
+   cache: { canvas, last:{sigma,thresh,posHex,negHex} }
+ }
+*/
+let LAYERS = [];
+let activeId = null;
+
+/* ===== Rendering of one layer to a processed mask canvas ===== */
+function processLayer(layer, globals){
+  const {thresh, sigma, posHex, negHex} = globals;
+  // cache reuse
+  const last = layer.cache.last || {};
+  if (layer.cache.canvas &&
+      last.thresh===thresh && last.sigma===sigma &&
+      last.posHex===posHex && last.negHex===negHex) {
+    return layer.cache.canvas;
+  }
+
+  const ow = layer.w, oh = layer.h;
+  const off = layer.cache.canvas || document.createElement('canvas');
+  off.width = ow; off.height = oh;
+  const octx = off.getContext('2d');
+
+  // Draw original
+  octx.clearRect(0,0,ow,oh);
+  octx.drawImage(layer.img, 0,0, ow, oh);
+
+  // Grayscale buffer
+  const imgData = octx.getImageData(0,0,ow,oh);
+  const d = imgData.data;
+  const gray = new Float32Array(ow*oh);
+  for (let i=0,j=0;i<d.length;i+=4,j++){
+    gray[j] = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]; // 0..255
+  }
+
+  // Smooth
+  const kernel = gaussianKernel1D(sigma);
+  let g2 = blur1DHorizontal(gray, ow, oh, kernel);
+  g2 = blur1DVertical(g2, ow, oh, kernel);
+
+  // Normalize to 0..1
+  let mn=Infinity, mx=-Infinity;
+  for (const v of g2){ if(v<mn)mn=v; if(v>mx)mx=v; }
+  const range = (mx - mn) || 1;
+  const T = thresh; // 0..1
+  const pos = toRGBA(posHex);
+  const neg = toRGBA(negHex);
+
+  // Write out positive/negative as flat fills
+  for (let i=0,j=0;i<d.length;i+=4,j++){
+    const v01 = (g2[j] - mn)/range;
+    const usePos = v01 >= T;
+    const c = usePos ? pos : neg;
+    d[i]=c.r; d[i+1]=c.g; d[i+2]=c.b; d[i+3]=255;
+  }
+  octx.putImageData(imgData,0,0);
+
+  layer.cache.canvas = off;
+  layer.cache.last = {thresh, sigma, posHex, negHex};
+  return off;
+}
+
+/* ===== Main render ===== */
+function render(){
+  const bg = ui.bg.value;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = bg;
+  ctx.fillRect(0,0,view.width,view.height);
+
+  const globals = {
+    thresh: (+ui.thresh.value)/100,
+    sigma: +ui.sigma.value,
+    posHex: ui.pos.value,
+    negHex: ui.neg.value,
+  };
+
+  // draw in order
+  let any = false;
+  for (const layer of LAYERS){
+    if (!layer.visible) continue;
+    any = true;
+    const mask = processLayer(layer, globals);
+    ctx.save();
+    ctx.globalAlpha = layer.opacity;
+    // position, rotation, scale
+    ctx.translate(layer.x, layer.y);
+    ctx.rotate(layer.rot);
+    ctx.scale(layer.scale, layer.scale);
+    // draw centered
+    ctx.drawImage(mask, -layer.w/2, -layer.h/2);
+    ctx.restore();
+  }
+  ui.hint.style.display = any ? 'none' : 'flex';
+}
+
+/* ===== Layers UI ===== */
+function refreshLayerList(){
+  ui.layers.innerHTML = '';
+  LAYERS.forEach((layer, idx)=>{
+    const el = document.createElement('div');
+    el.className = 'layer' + (layer.id===activeId ? ' active':'');
+    el.innerHTML = `
+      <div class="name">${layer.name}</div>
+      <div class="mini">
+        <label style="font-size:12px;display:flex;gap:6px;align-items:center;">
+          <input type="checkbox" ${layer.visible?'checked':''} data-k="vis">
+          <span>vis</span>
+        </label>
+        <button data-k="up">▲</button>
+        <button data-k="down">▼</button>
+        <button data-k="del" style="color:#e66">✕</button>
+      </div>
+      <div class="row" style="grid-column:1 / -1;">
+        <label>Opacity</label><input type="range" min="0" max="100" value="${Math.round(layer.opacity*100)}" data-k="op">
+      </div>
+      <div class="row" style="grid-column:1 / -1;">
+        <label>Scale</label><input type="range" min="1" max="400" value="${Math.round(layer.scale*100)}" data-k="sc"><span>${(layer.scale).toFixed(2)}×</span>
+      </div>
+      <div class="row" style="grid-column:1 / -1;">
+        <label>Rotation</label><input type="range" min="-180" max="180" value="${Math.round(layer.rot*180/Math.PI)}" data-k="rot"><span>${Math.round(layer.rot*180/Math.PI)}°</span>
+      </div>
+    `;
+    el.addEventListener('click', (e)=>{
+      // avoid stealing range drag; still select when clicking name/box area
+      const tag = (e.target.tagName||'').toLowerCase();
+      if (tag!=='input' && tag!=='button') setActive(layer.id);
+    });
+    el.querySelectorAll('input,button').forEach(node=>{
+      node.addEventListener('input', (ev)=>{
+        const k = node.dataset.k;
+        if (k==='op'){ layer.opacity = clamp(node.value/100,0,1); }
+        if (k==='sc'){ layer.scale = clamp(node.value/100,0.01,10); el.querySelector('span').textContent = layer.scale.toFixed(2)+'×'; }
+        if (k==='rot'){ layer.rot = (+node.value) * Math.PI/180; el.querySelectorAll('span')[1].textContent = Math.round(layer.rot*180/Math.PI)+'°'; }
+        if (k==='vis'){ layer.visible = node.checked; }
+        render();
+      });
+      node.addEventListener('click', (ev)=>{
+        const k = node.dataset.k;
+        if (k==='del'){ LAYERS = LAYERS.filter(l=>l.id!==layer.id); if (activeId===layer.id) activeId = (LAYERS[LAYERS.length-1]||{}).id||null; refreshLayerList(); render(); }
+        if (k==='up'){ const i = LAYERS.indexOf(layer); if (i>0){ [LAYERS[i-1],LAYERS[i]]=[LAYERS[i],LAYERS[i-1]]; refreshLayerList(); render(); } }
+        if (k==='down'){ const i = LAYERS.indexOf(layer); if (i<LAYERS.length-1){ [LAYERS[i+1],LAYERS[i]]=[LAYERS[i],LAYERS[i+1]]; refreshLayerList(); render(); } }
+      });
+    });
+    ui.layers.appendChild(el);
+  });
+}
+function setActive(id){
+  activeId = id;
+  refreshLayerList();
+  render();
+}
+
+/* ===== Loading images ===== */
+let nextId = 1;
+function addImage(fileOrUrl, nameHint){
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const layer = {
+        id: nextId++,
+        name: nameHint || (fileOrUrl.name||'image'),
+        img, w: img.naturalWidth, h: img.naturalHeight,
+        x: view.width/2, y: view.height/2,
+        scale: Math.min(1, Math.min(view.width/img.naturalWidth, view.height/img.naturalHeight)),
+        rot: 0,
+        opacity: 1,
+        visible: true,
+        cache: {canvas:null, last:null}
+      };
+      LAYERS.push(layer);
+      setActive(layer.id);
+      refreshLayerList();
+      render();
+      resolve();
+    };
+    img.onerror = reject;
+    if (fileOrUrl instanceof File){
+      const url = URL.createObjectURL(fileOrUrl);
+      img.src = url;
+    } else {
+      img.crossOrigin = "anonymous";
+      img.src = fileOrUrl;
+    }
+  });
+}
+
+/* drag & drop */
+;['dragenter','dragover'].forEach(evt=>{
+  ui.drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); ui.drop.classList.add('drag'); });
+});
+;['dragleave','drop'].forEach(evt=>{
+  ui.drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); ui.drop.classList.remove('drag'); });
+});
+ui.drop.addEventListener('drop', async (e)=>{
+  const files = [...e.dataTransfer.files].filter(f=>/^image\//.test(f.type));
+  for (const f of files) await addImage(f);
+});
+ui.picker.addEventListener('change', async (e)=>{
+  const files = [...ui.picker.files];
+  for (const f of files) await addImage(f);
+  ui.picker.value = '';
+});
+
+/* ===== Canvas size & save ===== */
+ui.resize.addEventListener('click', ()=>{
+  view.width = clamp(+ui.W.value, 100, 8000);
+  view.height = clamp(+ui.H.value, 100, 8000);
+  render();
+});
+ui.save.addEventListener('click', ()=>{
+  const a = document.createElement('a');
+  a.download = `positive_negative_${Date.now()}.png`;
+  a.href = view.toDataURL('image/png');
+  a.click();
+});
+
+/* ===== Global controls ===== */
+function syncReads(){
+  ui.threshV.textContent = ui.thresh.value + '%';
+  ui.sigmaV.textContent = (+ui.sigma.value).toFixed(1);
+  ui.swPos.style.background = ui.pos.value;
+  ui.swNeg.style.background = ui.neg.value;
+}
+['thresh','sigma','pos','neg','bg'].forEach(id=>{
+  $('#'+id).addEventListener('input', ()=>{ syncReads(); render(); });
+});
+syncReads();
+
+/* ===== Pointer interactions (drag / scale / rotate) ===== */
+let dragging = false;
+let dragDx = 0, dragDy = 0;
+function layerAt(x,y){
+  // hit-test from topmost to bottom: test transformed bounding box
+  for (let i=LAYERS.length-1; i>=0; i--){
+    const L = LAYERS[i];
+    if (!L.visible) continue;
+    // inverse-transform the point into layer space
+    const s = L.scale, c = Math.cos(L.rot), sn = Math.sin(L.rot);
+    const px = x - L.x, py = y - L.y;
+    const lx = ( c*px + sn*py) / s;
+    const ly = (-sn*px + c*py) / s;
+    if (lx >= -L.w/2 && lx <= L.w/2 && ly >= -L.h/2 && ly <= L.h/2){
+      return L;
+    }
+  }
+  return null;
+}
+view.addEventListener('pointerdown', (e)=>{
+  const rect = view.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (view.width/rect.width);
+  const y = (e.clientY - rect.top ) * (view.height/rect.height);
+  const hit = layerAt(x,y);
+  if (hit){
+    setActive(hit.id);
+    dragging = true;
+    dragDx = x - hit.x;
+    dragDy = y - hit.y;
+    view.setPointerCapture(e.pointerId);
+  }
+});
+view.addEventListener('pointermove', (e)=>{
+  if (!dragging || activeId==null) return;
+  const rect = view.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (view.width/rect.width);
+  const y = (e.clientY - rect.top ) * (view.height/rect.height);
+  const L = LAYERS.find(l=>l.id===activeId);
+  L.x = x - dragDx;
+  L.y = y - dragDy;
+  render();
+});
+view.addEventListener('pointerup', (e)=>{ dragging=false; });
+
+view.addEventListener('wheel', (e)=>{
+  if (activeId==null) return;
+  e.preventDefault();
+  const L = LAYERS.find(l=>l.id===activeId);
+  if (e.shiftKey){
+    // rotate
+    const delta = e.deltaY > 0 ?  -5 : 5; // degrees
+    L.rot += delta * Math.PI/180;
+  } else {
+    // scale
+    const factor = e.deltaY > 0 ? 0.95 : 1.05;
+    L.scale = clamp(L.scale * factor, 0.01, 10);
+  }
+  refreshLayerList();
+  render();
+}, {passive:false});
+
+/* ===== Keyboard (delete) ===== */
+window.addEventListener('keydown', (e)=>{
+  if ((e.key==='Delete' || e.key==='Backspace') && activeId!=null){
+    LAYERS = LAYERS.filter(l=>l.id!==activeId);
+    activeId = (LAYERS[LAYERS.length-1]||{}).id || null;
+    refreshLayerList(); render();
+  }
+});
+
+/* ===== Initial paint ===== */
+render();
+</script>
+</body>
+</html>

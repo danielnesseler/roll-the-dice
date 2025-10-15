@@ -1,0 +1,110 @@
+{
+  "name": "Mixed Tessellation Demo",
+  "description": "Background with wireframe, tessellation, and solid objects",
+  "renderMode": "mixed",
+  "background": {
+    "color": [0.02, 0.02, 0.08]
+  },
+  "objects": [
+    {
+      "name": "tessellated_sphere",
+      "type": "sphere",
+      "radius": 1.5,
+      "subdivisions": 32,
+      "transform": {
+        "translate": [0, 0, -8],
+        "scale": [1.2, 1.2, 1.2]
+      },
+      "renderMode": "tessellation",
+      "tessellation": {
+        "scale": 1.8,
+        "octaves": 3,
+        "bands": 5
+      },
+      "tessellationColors": [
+        [1.0, 0.2, 0.3],
+        [0.9, 0.4, 0.1], 
+        [0.8, 0.6, 0.0],
+        [0.7, 0.8, 0.1],
+        [0.5, 0.9, 0.3],
+        [0.3, 0.7, 0.5],
+        [0.2, 0.5, 0.7],
+        [0.1, 0.3, 0.9]
+      ]
+    },
+    {
+      "name": "left_tessellated_cube",
+      "type": "cube",
+      "size": [1.2, 1.2, 1.2],
+      "transform": {
+        "translate": [-4, 0, -10],
+        "rotateDeg": [45, 45, 0]
+      },
+      "renderMode": "tessellation",
+      "baseHue": 180,
+      "saturation": 80,
+      "lightness": 60,
+      "tessellation": {
+        "scale": 2.5,
+        "octaves": 4,
+        "bands": 6
+      }
+    },
+    {
+      "name": "right_wireframe_cube",
+      "type": "cube",
+      "size": [1.5, 1.5, 1.5],
+      "transform": {
+        "translate": [4, 0, -8],
+        "rotateDeg": [-45, -45, 0]
+      },
+      "wireColor": [0.0, 0.9, 1.0],
+      "renderMode": "wireframe"
+    },
+    {
+      "name": "ground_tessellated_plane",
+      "type": "plane",
+      "size": [12, 12],
+      "subdivisions": 24,
+      "transform": {
+        "translate": [0, -2, -6]
+      },
+      "renderMode": "tessellation",
+      "color": [0.2, 0.3, 0.6],
+      "tessellation": {
+        "scale": 0.8,
+        "octaves": 2,
+        "bands": 8
+      }
+    },
+    {
+      "name": "back_solid_sphere",
+      "type": "sphere",
+      "radius": 0.8,
+      "subdivisions": 16,
+      "transform": {
+        "translate": [-2, 1, -15]
+      },
+      "color": [0.3, 0.2, 0.5],
+      "renderMode": "solid"
+    },
+    {
+      "name": "back_tessellated_sphere",
+      "type": "sphere",
+      "radius": 0.8,
+      "subdivisions": 16,
+      "transform": {
+        "translate": [2, 1, -15]
+      },
+      "renderMode": "tessellation",
+      "baseHue": 60,
+      "saturation": 90,
+      "lightness": 65,
+      "tessellation": {
+        "scale": 3.0,
+        "octaves": 5,
+        "bands": 4
+      }
+    }
+  ]
+}

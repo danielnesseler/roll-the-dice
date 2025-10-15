@@ -26,9 +26,12 @@
   <header>
     <button id="reload">Reload OBJ</button>
     <input type="file" id="fileUpload" accept=".obj" style="margin-right: 10px;">
+    <input type="file" id="backgroundUpload" accept=".obj" style="margin-right: 10px;" title="Upload Background OBJ">
+    <button id="clearBackground" style="margin-right: 10px;">Clear Background</button>
     <label>Background 
       <select id="backgroundSelect">
         <option value="">Default</option>
+        <option value="mountains">Mountain Landscape</option>
         <option value="gallery">Gallery Scene</option>
         <option value="spiral">Spiral Formation</option>
         <option value="forest">Forest Theme</option>
@@ -41,10 +44,13 @@
     <label>Octaves <input id="octaves" type="range" min="1" max="8" value="4" /></label>
     <label>Spin <input id="spin" type="checkbox" checked /></label>
     <label>Hue° <input id="hue" type="range" min="0" max="359" value="0" /></label>
+    <label>Object X <input id="objX" type="range" min="-10" max="10" step="0.1" value="0" /></label>
+    <label>Object Y <input id="objY" type="range" min="-10" max="10" step="0.1" value="0" /></label>
+    <label>Object Z <input id="objZ" type="range" min="-10" max="10" step="0.1" value="0" /></label>
     <span id="palette"></span>
     <span id="status">init…</span>
   </header>
-  <main>
+  <main></main>
     <canvas id="glcanvas" width="960" height="600"></canvas>
     <div id="overlay" hidden></div>
   </main>
@@ -357,6 +363,9 @@ const scaleEl = document.getElementById('scale');
 const octEl   = document.getElementById('octaves');
 const spinEl  = document.getElementById('spin');
 const hueEl   = document.getElementById('hue');
+const objXEl  = document.getElementById('objX');
+const objYEl  = document.getElementById('objY');
+const objZEl  = document.getElementById('objZ');
 document.getElementById('reload').addEventListener('click', loadModel);
 hueEl.addEventListener('input', ()=> setPalette(Number(hueEl.value)));
 
@@ -602,6 +611,7 @@ async function loadScenicBackground(sceneName) {
   if (!sceneName) {
     // Reset to default
     currentBackground = null;
+    backgroundObjects = []; // Clear terrain objects too
     backgroundColors = [0.07, 0.06, 0.10];
     setPalette(Number(document.getElementById('hue').value));
     console.log('Reset to default background');
@@ -619,9 +629,20 @@ async function loadScenicBackground(sceneName) {
     const sceneData = await response.json();
     currentBackground = sceneData;
     
-    // Apply background gradient
-    if (sceneData.background && sceneData.background.colors) {
-      applyBackgroundGradient(sceneData.background.colors, sceneData.background.direction);
+    // Clear existing background objects
+    backgroundObjects = [];
+    
+    // Apply background gradient/colors
+    if (sceneData.background) {
+      if (sceneData.background.colors) {
+        applyBackgroundGradient(sceneData.background.colors, sceneData.background.direction);
+      } else if (sceneData.background.skyColor) {
+        // Use skyColor as background
+        backgroundColors = sceneData.background.skyColor;
+      } else if (sceneData.background.color) {
+        // Use single background color
+        backgroundColors = sceneData.background.color;
+      }
     }
     
     // Apply scene palette
@@ -629,8 +650,37 @@ async function loadScenicBackground(sceneName) {
       applyScenePalette(sceneData.palette);
     }
     
-    statusEl.textContent = `Background: ${sceneData.name || sceneName} loaded`;
-    console.log(`Loaded scenic background: ${sceneData.name}`, sceneData);
+    // Load terrain objects if they exist
+    if (sceneData.terrain) {
+      const terrainObjects = await loadTerrain(sceneData.terrain);
+      backgroundObjects.push(...terrainObjects);
+      console.log(`Loaded ${terrainObjects.length} terrain objects for ${sceneName}`);
+    }
+    
+    // Load regular scene objects if they exist (from gallery.json style)
+    if (sceneData.objects) {
+      for (const obj of sceneData.objects) {
+        if (obj.src) {
+          try {
+            const objGeo = await loadOBJFlat(obj.src);
+            const transform = obj.transform || {};
+            backgroundObjects.push({
+              geometry: objGeo,
+              position: transform.translate || [0, 0, 0],
+              rotation: transform.rotateDeg ? transform.rotateDeg.map(d => d * Math.PI / 180) : [0, 0, 0],
+              scale: transform.scale || [1, 1, 1],
+              name: obj.name || 'scene_object'
+            });
+          } catch (err) {
+            console.warn(`Failed to load scene object ${obj.src}:`, err);
+          }
+        }
+      }
+    }
+    
+    const totalBgObjects = backgroundObjects.length;
+    statusEl.textContent = `Background: ${sceneData.name || sceneName} loaded (${totalBgObjects} objects)`;
+    console.log(`Loaded scenic background: ${sceneData.name} with ${totalBgObjects} total objects`, sceneData);
     
   } catch (err) {
     console.error('Failed to load scenic background:', err);
@@ -646,6 +696,235 @@ backgroundSelect.addEventListener('change', (event) => {
   loadScenicBackground(event.target.value);
 });
 
+// ------------------ background object system ------------------
+let backgroundObjects = [];
+
+// Background upload functionality
+document.getElementById('backgroundUpload').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  console.log(`Starting background upload of: ${file.name}`);
+  statusEl.textContent = `Loading background ${file.name}...`;
+  overlay.hidden = true;
+
+  try {
+    const text = await file.text();
+    const uploadedGeo = await parseUploadedOBJ(text);
+    
+    // Add to background objects array
+    backgroundObjects.push({
+      geometry: uploadedGeo,
+      position: [0, 0, -2], // Place behind main object
+      rotation: [0, 0, 0],
+      scale: [0.7, 0.7, 0.7], // Make slightly smaller
+      name: file.name
+    });
+    
+    statusEl.textContent = `Background uploaded: ${file.name} (${backgroundObjects.length} bg objects)`;
+    console.log('Background upload complete');
+    
+  } catch (err) {
+    console.error('Background upload failed:', err);
+    statusEl.textContent = `Background upload failed: ${err.message}`;
+    overlay.hidden = false;
+    overlay.textContent = `Background upload failed: ${err.message}`;
+  }
+});
+
+// Clear background button
+document.getElementById('clearBackground').addEventListener('click', () => {
+  backgroundObjects = [];
+  statusEl.textContent = 'Background objects cleared';
+  console.log('All background objects cleared');
+});
+
+// Simple geometric primitives for background objects
+function cubeFlat() {
+  const positions = [];
+  const normals = [];
+  
+  // Define cube faces
+  const faces = [
+    // Front
+    [[-1,-1,1], [1,-1,1], [1,1,1], [-1,-1,1], [1,1,1], [-1,1,1]],
+    // Back  
+    [[1,-1,-1], [-1,-1,-1], [-1,1,-1], [1,-1,-1], [-1,1,-1], [1,1,-1]],
+    // Top
+    [[-1,1,1], [1,1,1], [1,1,-1], [-1,1,1], [1,1,-1], [-1,1,-1]],
+    // Bottom
+    [[-1,-1,-1], [1,-1,-1], [1,-1,1], [-1,-1,-1], [1,-1,1], [-1,-1,1]],
+    // Right
+    [[1,-1,1], [1,-1,-1], [1,1,-1], [1,-1,1], [1,1,-1], [1,1,1]],
+    // Left
+    [[-1,-1,-1], [-1,-1,1], [-1,1,1], [-1,-1,-1], [-1,1,1], [-1,1,-1]]
+  ];
+  
+  const faceNormals = [[0,0,1], [0,0,-1], [0,1,0], [0,-1,0], [1,0,0], [-1,0,0]];
+  
+  for (let f = 0; f < faces.length; f++) {
+    for (let v = 0; v < faces[f].length; v++) {
+      positions.push(...faces[f][v]);
+      normals.push(...faceNormals[f]);
+    }
+  }
+  
+  return { pos: new Float32Array(positions), nrm: new Float32Array(normals) };
+}
+
+function planeFlat(sizeX = 2, sizeZ = 2, subdiv = 8) {
+  const positions = [];
+  const normals = [];
+  
+  // Create subdivided plane
+  for (let i = 0; i < subdiv; i++) {
+    for (let j = 0; j < subdiv; j++) {
+      const x0 = (i / subdiv - 0.5) * sizeX;
+      const x1 = ((i + 1) / subdiv - 0.5) * sizeX;
+      const z0 = (j / subdiv - 0.5) * sizeZ;
+      const z1 = ((j + 1) / subdiv - 0.5) * sizeZ;
+      
+      // Two triangles per quad
+      positions.push(x0, 0, z0, x1, 0, z0, x1, 0, z1);
+      positions.push(x0, 0, z0, x1, 0, z1, x0, 0, z1);
+      
+      // Up normals for ground plane
+      for (let k = 0; k < 6; k++) {
+        normals.push(0, 1, 0);
+      }
+    }
+  }
+  
+  return { pos: new Float32Array(positions), nrm: new Float32Array(normals) };
+}
+
+function cylinderFlat(radius = 1, height = 2, sides = 8) {
+  const positions = [];
+  const normals = [];
+  
+  // Generate cylinder
+  for (let i = 0; i < sides; i++) {
+    const a1 = (i / sides) * Math.PI * 2;
+    const a2 = ((i + 1) / sides) * Math.PI * 2;
+    
+    const x1 = Math.cos(a1) * radius, z1 = Math.sin(a1) * radius;
+    const x2 = Math.cos(a2) * radius, z2 = Math.sin(a2) * radius;
+    
+    // Side faces
+    positions.push(x1, -height/2, z1, x2, -height/2, z2, x2, height/2, z2);
+    positions.push(x1, -height/2, z1, x2, height/2, z2, x1, height/2, z1);
+    
+    for (let j = 0; j < 6; j++) {
+      normals.push(j < 3 ? x2 : x1, 0, j < 3 ? z2 : z1);
+    }
+  }
+  
+  return { pos: new Float32Array(positions), nrm: new Float32Array(normals) };
+}
+
+function coneFlat(radius = 1, height = 2, sides = 8) {
+  const positions = [];
+  const normals = [];
+  
+  // Generate cone
+  for (let i = 0; i < sides; i++) {
+    const a1 = (i / sides) * Math.PI * 2;
+    const a2 = ((i + 1) / sides) * Math.PI * 2;
+    
+    const x1 = Math.cos(a1) * radius, z1 = Math.sin(a1) * radius;
+    const x2 = Math.cos(a2) * radius, z2 = Math.sin(a2) * radius;
+    
+    // Side faces
+    positions.push(0, height/2, 0, x1, -height/2, z1, x2, -height/2, z2);
+    
+    // Base triangles
+    positions.push(0, -height/2, 0, x2, -height/2, z2, x1, -height/2, z1);
+    
+    const nx = (x1 + x2) * 0.5;
+    const nz = (z1 + z2) * 0.5;
+    const len = Math.sqrt(nx*nx + nz*nz) || 1;
+    
+    // Side normals
+    normals.push(nx/len, 0.5, nz/len, nx/len, 0.5, nz/len, nx/len, 0.5, nz/len);
+    
+    // Base normals (pointing down)
+    normals.push(0, -1, 0, 0, -1, 0, 0, -1, 0);
+  }
+  
+  return { pos: new Float32Array(positions), nrm: new Float32Array(normals) };
+}
+
+function sphereFlat(radius = 1, subdiv = 2) {
+  // Use icosphere but scale by radius
+  const sphere = icosphereFlat(subdiv);
+  const scaledPos = new Float32Array(sphere.pos.length);
+  
+  for (let i = 0; i < sphere.pos.length; i += 3) {
+    scaledPos[i] = sphere.pos[i] * radius;
+    scaledPos[i + 1] = sphere.pos[i + 1] * radius;
+    scaledPos[i + 2] = sphere.pos[i + 2] * radius;
+  }
+  
+  return { pos: scaledPos, nrm: sphere.nrm };
+}
+
+// ------------------ terrain generation ------------------
+async function loadTerrain(terrainData) {
+  const terrainObjects = [];
+  
+  if (!terrainData || !Array.isArray(terrainData)) return terrainObjects;
+  
+  for (const terrain of terrainData) {
+    let geometry;
+    
+    switch (terrain.type) {
+      case 'plane':
+        const size = terrain.size || [10, 10];
+        const subdivisions = terrain.subdivisions || 16;
+        geometry = planeFlat(size[0], size[1], subdivisions);
+        break;
+        
+      case 'cone':
+        const radius = terrain.radius || 1;
+        const height = terrain.height || 2;
+        const sides = terrain.subdivisions || 12;
+        geometry = coneFlat(radius, height, sides);
+        break;
+        
+      case 'sphere':
+        const sphereRadius = terrain.radius || 1;
+        const sphereSubdiv = Math.max(1, Math.min(3, terrain.subdivisions || 2));
+        geometry = sphereFlat(sphereRadius, sphereSubdiv);
+        break;
+        
+      case 'cylinder':
+        const cylRadius = terrain.radius || 1;
+        const cylHeight = terrain.height || 2;
+        const cylSides = terrain.subdivisions || 12;
+        geometry = cylinderFlat(cylRadius, cylHeight, cylSides);
+        break;
+        
+      default:
+        console.warn(`Unknown terrain type: ${terrain.type}`);
+        continue;
+    }
+    
+    if (geometry) {
+      terrainObjects.push({
+        geometry,
+        position: terrain.position || [0, 0, 0],
+        rotation: terrain.rotation || [0, 0, 0],
+        scale: terrain.scale || [1, 1, 1],
+        name: terrain.name || `terrain_${terrain.type}`,
+        color: terrain.color || [0.5, 0.5, 0.5]
+      });
+    }
+  }
+  
+  console.log(`Generated ${terrainObjects.length} terrain objects`);
+  return terrainObjects;
+}
+
 function frame(tMs){
   const t = tMs*0.001;
 
@@ -659,11 +938,13 @@ function frame(tMs){
   let model = mat4Identity();
   if (spinEl.checked) model = mat4Mul(mat4RotateY(t*0.7), mat4RotateX(t*0.3));
   
+  // Apply object position controls
+  model = mat4Mul(mat4Translate(Number(objXEl.value), Number(objYEl.value), Number(objZEl.value)), model);
+  
   // Apply panning to the view matrix
   const view = mat4Translate(panX, panY, -3.6);
   const proj = mat4Perspective(Math.PI/3, aspect, 0.1, 100);
 
-  gl.uniformMatrix4fv(loc.u_model, false, model);
   gl.uniformMatrix4fv(loc.u_view,  false, view);
   gl.uniformMatrix4fv(loc.u_proj,  false, proj);
 
@@ -671,11 +952,74 @@ function frame(tMs){
   gl.clearColor(backgroundColors[0], backgroundColors[1], backgroundColors[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+  // Render background objects first (with gaussian tessellation)
+  for (const bgObj of backgroundObjects) {
+    if (!bgObj.geometry || !bgObj.geometry.pos) continue;
+    
+    // Set up background object transform
+    let bgModel = mat4Identity();
+    
+    // Apply transformations
+    if (bgObj.position) {
+      bgModel = mat4Mul(bgModel, mat4Translate(...bgObj.position));
+    }
+    if (bgObj.rotation) {
+      bgModel = mat4Mul(bgModel, mat4RotateY(bgObj.rotation[1]));
+      bgModel = mat4Mul(bgModel, mat4RotateX(bgObj.rotation[0]));
+    }
+    if (bgObj.scale) {
+      const s = bgObj.scale;
+      const scaleMatrix = new Float32Array([
+        s[0], 0, 0, 0,
+        0, s[1], 0, 0,
+        0, 0, s[2], 0,
+        0, 0, 0, 1
+      ]);
+      bgModel = mat4Mul(bgModel, scaleMatrix);
+    }
+    
+    // Add slight rotation for visual interest
+    if (spinEl.checked) {
+      bgModel = mat4Mul(bgModel, mat4RotateY(t * 0.3));
+    }
+    
+    gl.uniformMatrix4fv(loc.u_model, false, bgModel);
+    
+    // Upload and render background geometry with same shader
+    gl.bindBuffer(gl.ARRAY_BUFFER, vboPos);
+    gl.bufferData(gl.ARRAY_BUFFER, bgObj.geometry.pos, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(loc.a_pos);
+    gl.vertexAttribPointer(loc.a_pos, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, vboNrm);
+    gl.bufferData(gl.ARRAY_BUFFER, bgObj.geometry.nrm, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(loc.a_nrm);
+    gl.vertexAttribPointer(loc.a_nrm, 3, gl.FLOAT, false, 0, 0);
+    
+    const bgVertCount = bgObj.geometry.pos.length / 3;
+    gl.drawArrays(gl.TRIANGLES, 0, bgVertCount);
+  }
+
+  // Render main object on top
+  gl.uniformMatrix4fv(loc.u_model, false, model);
+  
+  // Re-upload main geometry
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboPos);
+  gl.bufferData(gl.ARRAY_BUFFER, geo.pos, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc.a_pos);
+  gl.vertexAttribPointer(loc.a_pos, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboNrm);
+  gl.bufferData(gl.ARRAY_BUFFER, geo.nrm, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc.a_nrm);
+  gl.vertexAttribPointer(loc.a_nrm, 3, gl.FLOAT, false, 0, 0);
+
   const vertCount = geo.pos.length / 3;
   gl.drawArrays(gl.TRIANGLES, 0, vertCount);
 
   const bgInfo = currentBackground ? ` | bg:${currentBackground.name || 'scenic'}` : '';
-  statusEl.textContent = `verts:${vertCount} | pan:[${panX.toFixed(2)},${panY.toFixed(2)}]${bgInfo} | bands:${bandsEl.value} scale:${scaleEl.value} oct:${octEl.value} hue:${hueEl.value}°`;
+  const bgObjInfo = backgroundObjects.length > 0 ? ` | bgObjs:${backgroundObjects.length}` : '';
+  statusEl.textContent = `verts:${vertCount} | pan:[${panX.toFixed(2)},${panY.toFixed(2)}]${bgInfo}${bgObjInfo} | bands:${bandsEl.value} scale:${scaleEl.value} oct:${octEl.value} hue:${hueEl.value}° obj:[${objXEl.value},${objYEl.value},${objZEl.value}]`;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

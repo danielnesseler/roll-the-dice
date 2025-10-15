@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Tessellation Experiment — periodic & aperiodic (Penrose)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      height: 100vh;
+      font-family: system-ui, sans-serif;
+      background: #0b0b0c;
+      color: #eee;
+    }
+    aside {
+      padding: 14px;
+      border-right: 1px solid #0006;
+      background: #111215;
+      overflow: auto;
+    }
+    main { display: grid; place-items: center; }
+    canvas {
+      width: min(96vw, 1600px);
+      height: auto;
+      background: #121317;
+      box-shadow: 0 12px 50px #000a;
+      border-radius: 12px;
+    }
+    h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; opacity:.85; margin: 16px 0 8px; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin: 8px 0; }
+    .row input[type="range"], .row input[type="number"], .row input[type="text"], .row select { width: 100%; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    button { cursor: pointer; }
+    .note { font-size: 12px; opacity:.75; line-height:1.4; }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="two" style="margin-bottom:8px;">
+      <button id="regen">Regenerate</button>
+      <button id="save">Save PNG</button>
+    </div>
+
+    <h2>Pattern</h2>
+    <div class="row">
+      <label for="pattern">Type</label>
+      <select id="pattern">
+        <option value="squares">Squares (periodic)</option>
+        <option value="triangles">Triangles (periodic)</option>
+        <option value="hexagons">Hexagons (periodic)</option>
+        <option value="penrose" selected>Penrose Rhombs (aperiodic)</option>
+      </select>
+    </div>
+
+    <div id="periodicControls">
+      <div class="row"><label>Cell size (px)</label><input id="cell" type="range" min="12" max="180" value="64"><span id="cellV">64</span></div>
+    </div>
+
+    <div id="penroseControls" style="display:none;">
+      <div class="row"><label>Iterations</label><input id="iters" type="range" min="2" max="6" value="4"><span id="itersV">4</span></div>
+      <div class="row"><label>Scale %</label><input id="scale" type="range" min="50" max="220" value="120"><span id="scaleV">120</span></div>
+    </div>
+
+    <h2>Appearance</h2>
+    <div class="row"><label>Seed</label><input id="seed" type="number" step="1" value="42"><button id="randSeed">🎲</button></div>
+    <div class="row"><label>Stroke</label><select id="stroke"><option value="none">none</option><option value="hairline" selected>hairline</option><option value="bold">bold</option></select></div>
+    <div class="row"><label>Background</label><input id="bg" type="color" value="#121317"></div>
+
+    <h2>Notes</h2>
+    <p class="note">
+      • “Periodic” grids (squares, triangles, hexagons) repeat by translation.<br>
+      • “Penrose Rhombs” is an aperiodic tiling from two rhombi (thick & thin) via inflation rules; cells won’t line up in a repeating grid.<br>
+      • Each cell gets a pseudo-random color (seeded), so the same seed reproduces the same colors.
+    </p>
+  </aside>
+
+  <main>
+    <canvas id="c" width="1400" height="900"></canvas>
+  </main>
+
+  <script type="module">
+    // ---------- seeded RNG ----------
+    function mulberry32(a){ return function(){ let t = a += 0x6D2B79F5; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+    function makeRng(seed){ return mulberry32((seed|0) >>> 0); }
+    const randInt = (r, lo, hi)=> Math.floor(r()*(hi-lo+1))+lo;
+    const randFloat = (r, lo, hi)=> lo + r()*(hi-lo);
+
+    // ---------- color helpers ----------
+    function hslToRgb(h, s, l){
+      s/=100; l/=100;
+      const k = n => (n + h/30) % 12;
+      const a = s * Math.min(l, 1 - l);
+      const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+      return [Math.round(255*f(0)), Math.round(255*f(8)), Math.round(255*f(4))];
+    }
+    function randColor(r){
+      const h = randInt(r, 0, 359);
+      const s = randInt(r, 55, 95);
+      const l = randInt(r, 40, 70);
+      const [R,G,B] = hslToRgb(h,s,l);
+      return `rgb(${R},${G},${B})`;
+    }
+
+    // ---------- canvas & UI ----------
+    const $ = s => document.querySelector(s);
+    const canvas = $('#c');
+    const ctx = canvas.getContext('2d');
+
+    const ui = {
+      pattern: $('#pattern'),
+      cell: $('#cell'), cellV: $('#cellV'),
+      iters: $('#iters'), itersV: $('#itersV'),
+      scale: $('#scale'), scaleV: $('#scaleV'),
+      seed: $('#seed'), randSeed: $('#randSeed'),
+      stroke: $('#stroke'), bg: $('#bg'),
+      regen: $('#regen'), save: $('#save'),
+      periodicControls: $('#periodicControls'),
+      penroseControls: $('#penroseControls'),
+    };
+
+    function sync(){
+      ui.cellV.textContent  = ui.cell.value;
+      ui.itersV.textContent = ui.iters.value;
+      ui.scaleV.textContent = ui.scale.value;
+      const pen = ui.pattern.value === 'penrose';
+      ui.penroseControls.style.display  = pen ? '' : 'none';
+      ui.periodicControls.style.display = pen ? 'none' : '';
+    }
+
+    ['input','change'].forEach(ev=>{
+      ui.pattern.addEventListener(ev, ()=>{ sync(); draw(); });
+      ui.cell.addEventListener(ev, ()=>{ sync(); draw(); });
+      ui.iters.addEventListener(ev, ()=>{ sync(); draw(); });
+      ui.scale.addEventListener(ev, ()=>{ sync(); draw(); });
+      ui.seed.addEventListener(ev, ()=> draw());
+      ui.stroke.addEventListener(ev, ()=> draw());
+      ui.bg.addEventListener(ev, ()=> draw());
+    });
+    ui.randSeed.addEventListener('click', ()=>{ ui.seed.value = Math.floor(Math.random()*1e9); draw(); });
+    ui.regen.addEventListener('click', draw);
+    ui.save.addEventListener('click', ()=>{
+      const link = document.createElement('a');
+      link.download = `tessellation_${ui.pattern.value}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
+
+    sync();
+
+    // ---------- periodic tilings ----------
+    function drawSquares(rng, cell){
+      const W=canvas.width, H=canvas.height;
+      for(let y=0;y<H;y+=cell){
+        for(let x=0;x<W;x+=cell){
+          ctx.fillStyle = randColor(rng);
+          ctx.fillRect(x,y,cell,cell);
+        }
+      }
+    }
+    function drawTriangles(rng, cell){
+      const W=canvas.width, H=canvas.height;
+      const h = cell * Math.sqrt(3)/2;
+      for(let row=0, y=0; y<H+h; row++, y += h){
+        const offset = (row%2) ? cell/2 : 0;
+        for(let x=-cell; x<W+cell; x+=cell){
+          // upward
+          ctx.beginPath();
+          ctx.moveTo(x+offset, y);
+          ctx.lineTo(x+offset+cell/2, y+h);
+          ctx.lineTo(x+offset-cell/2, y+h);
+          ctx.closePath();
+          ctx.fillStyle = randColor(rng);
+          ctx.fill();
+
+          // downward
+          ctx.beginPath();
+          ctx.moveTo(x+offset, y+h*2);
+          ctx.lineTo(x+offset+cell/2, y+h);
+          ctx.lineTo(x+offset-cell/2, y+h);
+          ctx.closePath();
+          ctx.fillStyle = randColor(rng);
+          ctx.fill();
+        }
+      }
+    }
+    function drawHexagons(rng, cell){
+      // cell = flat-to-flat width; hex side = cell/2
+      const W=canvas.width, H=canvas.height;
+      const s = cell/2;
+      const h = Math.sqrt(3)*s;
+      const stepX = 1.5*s;
+      const stepY = h;
+
+      for(let row=0, y=0; y<H+stepY; row++, y += stepY){
+        const offsetX = (row%2) ? 0.75*cell : 0;
+        for(let x=-cell; x<W+cell; x+= stepX*2){
+          const cx = x + offsetX;
+          const hex = [
+            [cx - s/2, y - h/2],
+            [cx + s/2, y - h/2],
+            [cx + s,   y     ],
+            [cx + s/2, y + h/2],
+            [cx - s/2, y + h/2],
+            [cx - s,   y     ],
+          ];
+          ctx.beginPath();
+          ctx.moveTo(hex[0][0], hex[0][1]);
+          for(let i=1;i<hex.length;i++) ctx.lineTo(hex[i][0], hex[i][1]);
+          ctx.closePath();
+          ctx.fillStyle = randColor(rng);
+          ctx.fill();
+        }
+      }
+    }
+
+    // ---------- Penrose rhomb tiling (aperiodic) ----------
+    // Based on inflation/deflation rules for thick/thin rhombs (P3).
+    // Each tile carries:
+    //  { type: 'thick'|'thin', a:[x,y], b:[x,y], c:[x,y], d:[x,y] }
+    const TAU = (1 + Math.sqrt(5))/2; // golden ratio φ
+
+    function vAdd(a,b){ return [a[0]+b[0], a[1]+b[1]]; }
+    function vSub(a,b){ return [a[0]-b[0], a[1]-b[1]]; }
+    function vMul(a,k){ return [a[0]*k, a[1]*k]; }
+
+    function makeRhomb(type, a,b,c,d){ return {type, a,b,c,d}; }
+
+    // start configuration: a "sun" (5 thick rhombs around origin)
+    function penroseSeed(){
+      const tiles=[];
+      const R = 100; // initial radius unit
+      for(let i=0;i<5;i++){
+        const t1 = 2*Math.PI*i/5, t2 = 2*Math.PI*(i+1)/5;
+        const p0 = [0,0];
+        const p1 = [R*Math.cos(t1), R*Math.sin(t1)];
+        const p2 = [R*Math.cos(t2), R*Math.sin(t2)];
+        // thick rhomb made from p0,p1, mid, p2 (approx by kite)
+        const m  = vMul(vAdd(p1,p2), 0.5);
+        tiles.push(makeRhomb('thick', p0, p1, m, p2));
+      }
+      return tiles;
+    }
+
+    // Inflate rules (converted to rhomb form).
+    // These are simplified geometric constructions that preserve adjacency; good for visual tiling.
+    function inflate(tiles){
+      const out=[];
+      for(const t of tiles){
+        const {a,b,c,d} = t;
+        if(t.type==='thick'){
+          // Split into: 2 thick + 1 thin
+          // points along diagonals with φ ratios
+          const ab = vAdd(a, vMul(vSub(b,a), 1/TAU));
+          const ad = vAdd(a, vMul(vSub(d,a), 1/TAU));
+          const cb = vAdd(c, vMul(vSub(b,c), 1/TAU));
+          const cd = vAdd(c, vMul(vSub(d,c), 1/TAU));
+
+          out.push(makeRhomb('thick', a, ab, c, ad));
+          out.push(makeRhomb('thin',  ab, b,  cb, c));
+          out.push(makeRhomb('thick', ad, c,  cd, d));
+        } else {
+          // thin -> 2 thin + 1 thick
+          const ab = vAdd(a, vMul(vSub(b,a), 1/TAU));
+          const ad = vAdd(a, vMul(vSub(d,a), 1/TAU));
+          const cb = vAdd(c, vMul(vSub(b,c), 1/TAU));
+          const cd = vAdd(c, vMul(vSub(d,c), 1/TAU));
+
+          out.push(makeRhomb('thin',  a, ab, c, ad));
+          out.push(makeRhomb('thin',  ab, b,  cb, c));
+          out.push(makeRhomb('thick', ad, c,  cd, d));
+        }
+      }
+      return out;
+    }
+
+    function centerAndScale(tiles, W, H, extraScale=1.0){
+      let minX=+Infinity, minY=+Infinity, maxX=-Infinity, maxY=-Infinity;
+      for(const t of tiles){
+        for(const p of [t.a,t.b,t.c,t.d]){
+          if(p[0]<minX) minX=p[0]; if(p[1]<minY) minY=p[1];
+          if(p[0]>maxX) maxX=p[0]; if(p[1]>maxY) maxY=p[1];
+        }
+      }
+      const w=maxX-minX, h=maxY-minY;
+      const s = Math.min(W/(w||1), H/(h||1))*0.9*extraScale;
+      const cx = (minX+maxX)/2, cy = (minY+maxY)/2;
+      const tx = W/2 - s*cx, ty = H/2 - s*cy;
+      for(const t of tiles){
+        t.a = [t.a[0]*s + tx, t.a[1]*s + ty];
+        t.b = [t.b[0]*s + tx, t.b[1]*s + ty];
+        t.c = [t.c[0]*s + tx, t.c[1]*s + ty];
+        t.d = [t.d[0]*s + tx, t.d[1]*s + ty];
+      }
+      return tiles;
+    }
+
+    function generatePenrose(iterations, extraScale){
+      let tiles = penroseSeed();
+      for(let i=0;i<iterations;i++) tiles = inflate(tiles);
+      return centerAndScale(tiles, canvas.width, canvas.height, extraScale);
+    }
+
+    function drawPenrose(rng, iterations, extraScale, strokeMode){
+      const tiles = generatePenrose(iterations, extraScale/100);
+      for(const t of tiles){
+        ctx.beginPath();
+        ctx.moveTo(t.a[0], t.a[1]);
+        ctx.lineTo(t.b[0], t.b[1]);
+        ctx.lineTo(t.c[0], t.c[1]);
+        ctx.lineTo(t.d[0], t.d[1]);
+        ctx.closePath();
+        ctx.fillStyle = randColor(rng);
+        ctx.fill();
+      }
+      if(strokeMode!=='none'){
+        ctx.lineWidth = strokeMode==='bold' ? 1.5 : 0.5;
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        for(const t of tiles){
+          ctx.beginPath();
+          ctx.moveTo(t.a[0], t.a[1]);
+          ctx.lineTo(t.b[0], t.b[1]);
+          ctx.lineTo(t.c[0], t.c[1]);
+          ctx.lineTo(t.d[0], t.d[1]);
+          ctx.closePath();
+          ctx.stroke();
+        }
+      }
+    }
+
+    // ---------- main draw ----------
+    function draw(){
+      const seed = (+ui.seed.value)|0;
+      const rng = makeRng(seed);
+      const pattern = ui.pattern.value;
+      const bg = ui.bg.value;
+      ctx.save();
+      ctx.fillStyle = bg;
+      ctx.fillRect(0,0,canvas.width, canvas.height);
+      ctx.restore();
+
+      if(pattern==='squares'){
+        drawSquares(rng, +ui.cell.value);
+      } else if(pattern==='triangles'){
+        drawTriangles(rng, +ui.cell.value);
+      } else if(pattern==='hexagons'){
+        drawHexagons(rng, +ui.cell.value);
+      } else {
+        drawPenrose(rng, +ui.iters.value, +ui.scale.value, ui.stroke.value);
+      }
+
+      // optional outline for periodic
+      if(pattern!=='penrose' && ui.stroke.value!=='none'){
+        ctx.lineWidth = ui.stroke.value==='bold' ? 1.25 : 0.5;
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        if(pattern==='squares'){
+          const cell=+ui.cell.value;
+          for(let y=0;y<=canvas.height;y+=cell){
+            ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+          }
+          for(let x=0;x<=canvas.width;x+=cell){
+            ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+          }
+        }
+        // triangles / hexagons already drawn as filled polygons; edges show via shape boundaries if needed.
+      }
+    }
+
+    // initial
+    draw();
+
+    // handle resize (optional: keep canvas device-pixel crisp)
+    const DPR = Math.min(2, window.devicePixelRatio||1);
+    function fitCanvas(){
+      const rect = canvas.getBoundingClientRect();
+      const w = Math.round(rect.width  * DPR);
+      const h = Math.round(rect.height * DPR);
+      if (canvas.width!==w || canvas.height!==h){
+        canvas.width=w; canvas.height=h;
+        draw();
+      }
+    }
+    window.addEventListener('resize', fitCanvas);
+    fitCanvas();
+  </script>
+</body>
+</html>

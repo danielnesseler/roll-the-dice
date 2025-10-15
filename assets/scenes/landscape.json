@@ -1,0 +1,71 @@
+{
+  "name": "Mountain Landscape",
+  "description": "3D rendered landscape with mountains and terrain",
+  "type": "landscape",
+  "background": {
+    "skyColor": [0.4, 0.6, 0.9],
+    "horizonColor": [0.8, 0.7, 0.6],
+    "groundColor": [0.3, 0.5, 0.2]
+  },
+  "terrain": [
+    {
+      "name": "ground_plane",
+      "type": "plane",
+      "size": [20, 20],
+      "position": [0, -2, 0],
+      "color": [0.2, 0.4, 0.1],
+      "subdivisions": 32
+    },
+    {
+      "name": "mountain_1",
+      "type": "cone",
+      "radius": 3,
+      "height": 4,
+      "position": [-8, -2, -10],
+      "color": [0.5, 0.4, 0.3],
+      "subdivisions": 16
+    },
+    {
+      "name": "mountain_2", 
+      "type": "cone",
+      "radius": 2.5,
+      "height": 3.5,
+      "position": [-4, -2, -12],
+      "color": [0.4, 0.3, 0.3],
+      "subdivisions": 16
+    },
+    {
+      "name": "mountain_3",
+      "type": "cone", 
+      "radius": 2,
+      "height": 3,
+      "position": [6, -2, -8],
+      "color": [0.6, 0.5, 0.4],
+      "subdivisions": 16
+    },
+    {
+      "name": "hill_1",
+      "type": "sphere",
+      "radius": 1.5,
+      "position": [3, -1.5, -6],
+      "color": [0.3, 0.5, 0.2],
+      "subdivisions": 12
+    },
+    {
+      "name": "hill_2",
+      "type": "sphere",
+      "radius": 1.2,
+      "position": [-2, -1.8, -5],
+      "color": [0.25, 0.45, 0.15],
+      "subdivisions": 12
+    }
+  ],
+  "lighting": {
+    "sunDirection": [0.5, 0.8, 0.3],
+    "sunColor": [1.0, 0.9, 0.7],
+    "ambient": [0.3, 0.3, 0.4]
+  },
+  "camera": {
+    "backgroundDistance": 15
+  }
+}

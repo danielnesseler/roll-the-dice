@@ -1,0 +1,121 @@
+{
+  "name": "Simple Nature",
+  "description": "Simple background with mountains and trees",
+  "type": "landscape",
+  "background": {
+    "skyColor": [0.5, 0.7, 0.9],
+    "horizonColor": [0.8, 0.8, 0.7],
+    "groundColor": [0.2, 0.4, 0.2]
+  },
+  "terrain": [
+    {
+      "name": "ground",
+      "type": "plane",
+      "size": [30, 30],
+      "position": [0, -3, 0],
+      "color": [0.2, 0.5, 0.2],
+      "subdivisions": 4
+    },
+    {
+      "name": "mountain_back_1",
+      "type": "triangle",
+      "points": [
+        [-15, -3, -20],
+        [-10, 2, -20],
+        [-5, -3, -20]
+      ],
+      "color": [0.4, 0.4, 0.5]
+    },
+    {
+      "name": "mountain_back_2",
+      "type": "triangle",
+      "points": [
+        [-8, -3, -18],
+        [-3, 3, -18],
+        [2, -3, -18]
+      ],
+      "color": [0.3, 0.3, 0.4]
+    },
+    {
+      "name": "mountain_back_3",
+      "type": "triangle",
+      "points": [
+        [5, -3, -15],
+        [12, 1, -15],
+        [18, -3, -15]
+      ],
+      "color": [0.5, 0.5, 0.6]
+    },
+    {
+      "name": "tree_1",
+      "type": "group",
+      "children": [
+        {
+          "name": "trunk_1",
+          "type": "cylinder",
+          "radius": 0.2,
+          "height": 2,
+          "position": [-8, -2, -8],
+          "color": [0.4, 0.2, 0.1]
+        },
+        {
+          "name": "foliage_1",
+          "type": "sphere",
+          "radius": 1.5,
+          "position": [-8, 0, -8],
+          "color": [0.2, 0.6, 0.2]
+        }
+      ]
+    },
+    {
+      "name": "tree_2",
+      "type": "group",
+      "children": [
+        {
+          "name": "trunk_2",
+          "type": "cylinder",
+          "radius": 0.15,
+          "height": 1.8,
+          "position": [6, -2.1, -6],
+          "color": [0.3, 0.2, 0.1]
+        },
+        {
+          "name": "foliage_2",
+          "type": "sphere",
+          "radius": 1.2,
+          "position": [6, -0.2, -6],
+          "color": [0.1, 0.5, 0.1]
+        }
+      ]
+    },
+    {
+      "name": "tree_3",
+      "type": "group",
+      "children": [
+        {
+          "name": "trunk_3",
+          "type": "cylinder",
+          "radius": 0.25,
+          "height": 2.5,
+          "position": [2, -1.75, -10],
+          "color": [0.5, 0.3, 0.2]
+        },
+        {
+          "name": "foliage_3",
+          "type": "sphere",
+          "radius": 1.8,
+          "position": [2, 0.5, -10],
+          "color": [0.15, 0.7, 0.15]
+        }
+      ]
+    }
+  ],
+  "lighting": {
+    "sunDirection": [0.3, 0.8, 0.5],
+    "sunColor": [1.0, 0.95, 0.8],
+    "ambient": [0.4, 0.4, 0.5]
+  },
+  "camera": {
+    "backgroundDistance": 25
+  }
+}
