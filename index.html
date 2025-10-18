@@ -7,13 +7,27 @@
 <style>
   :root { color-scheme: light dark; }
   html, body { height: 100%; margin: 0; }
-  body { display: grid; grid-template-rows: auto 1fr; background:#0b0b10; color:#e8e8ef; font-family: system-ui, sans-serif; }
-  header { display:flex; gap:14px; align-items:center; padding:10px 14px; border-bottom:1px solid #ffffff17; }
+  body { display: grid; grid-template-rows: auto 1fr; background:#0b0b10; color:#e8e8ef; font-family: system-ui, sans-serif; overflow: hidden; }
+  header { display:flex; gap:14px; align-items:center; padding:10px 14px; border-bottom:1px solid #ffffff17; flex-wrap: wrap; }
   label { display:inline-grid; grid-auto-flow: column; align-items:center; gap:6px; font-size:13px; }
   input[type="range"] { width: 160px; }
   #status { margin-left:auto; opacity:.8; font-size:12px; }
-  main { position:relative; display:grid; place-items:center; }
-  canvas { background:#101018; border-radius:10px; box-shadow:0 10px 40px #000a; }
+  main { 
+    position:relative; 
+    display:grid; 
+    place-items:center; 
+    overflow: auto; 
+    width: 100vw; 
+    height: calc(100vh - 80px);
+    padding: 20px;
+  }
+  canvas { 
+    background:#101018; 
+    border-radius:10px; 
+    box-shadow:0 10px 40px #000a; 
+    cursor: grab;
+  }
+  canvas:active { cursor: grabbing; }
   #overlay {
     position:absolute; left:12px; top:12px; padding:8px 10px; border-radius:8px;
     background:#111a; border:1px solid #ffffff22; font:12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -50,8 +64,8 @@
     <span id="palette"></span>
     <span id="status">init…</span>
   </header>
-  <main></main>
-    <canvas id="glcanvas" width="960" height="600"></canvas>
+  <main>
+    <canvas id="glcanvas" width="1920" height="1200"></canvas>
     <div id="overlay" hidden></div>
   </main>
 
@@ -64,17 +78,46 @@ function showError(msg){
   console.error(msg);
 }
 
-// ------------------ GL init ------------------
+// ------------------ GL init with dynamic canvas sizing ------------------
 const canvas = document.getElementById('glcanvas');
 const gl = canvas.getContext('webgl', { antialias: true });
 if (!gl) { showError('WebGL not available.'); throw new Error('No WebGL'); }
-function setViewportForDPR(){
-  const dpr = Math.max(1, window.devicePixelRatio||1);
-  // keep logical size; viewport accounts for DPR
-  gl.viewport(0,0, canvas.width * dpr, canvas.height * dpr);
+
+// Dynamic canvas sizing function
+function resizeCanvasToViewport() {
+  const container = canvas.parentElement;
+  const containerWidth = container.clientWidth - 40; // Account for padding
+  const containerHeight = container.clientHeight - 40; // Account for padding
+  
+  // Set minimum size but allow it to grow much larger
+  const minWidth = 1200;
+  const minHeight = 800;
+  const displayWidth = Math.max(minWidth, Math.min(3840, containerWidth)); // Up to 4K width
+  const displayHeight = Math.max(minHeight, Math.min(2400, containerHeight)); // Up to 2400px height
+  
+  // Set CSS display size (what the user sees)
+  canvas.style.width = displayWidth + 'px';
+  canvas.style.height = displayHeight + 'px';
+  
+  // Set internal buffer resolution (for rendering)
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  canvas.width = displayWidth * dpr;
+  canvas.height = displayHeight * dpr;
+  
+  console.log(`Canvas display: ${displayWidth} x ${displayHeight}, buffer: ${canvas.width} x ${canvas.height} (DPR: ${dpr})`);
 }
-setViewportForDPR();
-window.addEventListener('resize', setViewportForDPR);
+
+// Initialize canvas size
+resizeCanvasToViewport();
+
+// Set WebGL viewport to match canvas buffer size
+gl.viewport(0, 0, canvas.width, canvas.height);
+
+// Handle window resize
+window.addEventListener('resize', () => {
+  resizeCanvasToViewport();
+  gl.viewport(0, 0, canvas.width, canvas.height);
+});
 
 // ------------------ shaders ------------------
 const VS = `
@@ -498,13 +541,13 @@ async function loadModel() {
   overlay.hidden = true;
   try {
     statusEl.textContent = 'loading OBJ…';
-    const m = await loadOBJFlat('/assets/models/teapot.obj');
+    const m = await loadOBJFlat('assets/models/teapot.obj');
     geo = m;
     uploadGeometryFlat(geo);
     statusEl.textContent = `OBJ loaded (triangles: ${geo.pos.length/9})`;
   } catch (e) {
     overlay.hidden = false;
-    overlay.textContent = `OBJ load failed (${e.message}). Using fallback icosphere.\nCheck path: /assets/models/teapot.obj`;
+    overlay.textContent = `OBJ load failed (${e.message}). Using fallback icosphere.\nCheck path: assets/models/teapot.obj`;
     statusEl.textContent = 'using fallback icosphere';
     geo = icosphereFlat(2);
     uploadGeometryFlat(geo);
@@ -619,46 +662,62 @@ async function loadScenicBackground(sceneName) {
   }
   
   try {
+    console.log(`Attempting to load background: ${sceneName}`);
     statusEl.textContent = `Loading ${sceneName} background...`;
-    const response = await fetch(`/assets/scenes/${sceneName}.json`, { cache: 'no-store' });
+    const response = await fetch(`assets/scenes/${sceneName}.json`, { cache: 'no-store' });
+    
+    console.log(`Fetch response status: ${response.status} ${response.statusText}`);
     
     if (!response.ok) {
       throw new Error(`Failed to load ${sceneName}.json: ${response.status}`);
     }
     
     const sceneData = await response.json();
+    console.log(`Loaded scene data:`, sceneData);
     currentBackground = sceneData;
     
     // Clear existing background objects
     backgroundObjects = [];
+    console.log('Cleared existing background objects');
     
     // Apply background gradient/colors
     if (sceneData.background) {
+      console.log('Processing background settings:', sceneData.background);
       if (sceneData.background.colors) {
         applyBackgroundGradient(sceneData.background.colors, sceneData.background.direction);
       } else if (sceneData.background.skyColor) {
         // Use skyColor as background
         backgroundColors = sceneData.background.skyColor;
+        console.log('Applied skyColor:', backgroundColors);
       } else if (sceneData.background.color) {
         // Use single background color
         backgroundColors = sceneData.background.color;
+        console.log('Applied background color:', backgroundColors);
       }
     }
     
     // Apply scene palette
     if (sceneData.palette) {
+      console.log('Applying scene palette:', sceneData.palette);
       applyScenePalette(sceneData.palette);
     }
     
     // Load terrain objects if they exist
     if (sceneData.terrain) {
+      console.log(`Loading ${sceneData.terrain.length} terrain objects...`);
       const terrainObjects = await loadTerrain(sceneData.terrain);
       backgroundObjects.push(...terrainObjects);
-      console.log(`Loaded ${terrainObjects.length} terrain objects for ${sceneName}`);
+      console.log(`Successfully loaded ${terrainObjects.length} terrain objects for ${sceneName}`);
+      
+      // Log each terrain object for debugging
+      terrainObjects.forEach((obj, i) => {
+        console.log(`Terrain ${i}: ${obj.name}, pos: [${obj.position.join(', ')}], vertices: ${obj.geometry.pos.length/3}`);
+      });
     }
     
     // Load regular scene objects if they exist (from gallery.json style)
     if (sceneData.objects) {
+      console.log(`Loading ${sceneData.objects.length} regular scene objects...`);
       for (const obj of sceneData.objects) {
         if (obj.src) {
           try {
@@ -680,10 +739,10 @@ async function loadScenicBackground(sceneName) {
     
     const totalBgObjects = backgroundObjects.length;
     statusEl.textContent = `Background: ${sceneData.name || sceneName} loaded (${totalBgObjects} objects)`;
-    console.log(`Loaded scenic background: ${sceneData.name} with ${totalBgObjects} total objects`, sceneData);
+    console.log(`✅ Successfully loaded scenic background: ${sceneData.name} with ${totalBgObjects} total objects`);
     
   } catch (err) {
-    console.error('Failed to load scenic background:', err);
+    console.error('❌ Failed to load scenic background:', err);
     statusEl.textContent = `Background load failed: ${err.message}`;
     overlay.hidden = false;
     overlay.textContent = `Failed to load ${sceneName} background: ${err.message}`;
@@ -934,7 +993,13 @@ function frame(tMs){
   gl.uniform1i(loc.u_octaves, Number(octEl.value));
   gl.uniform1f(loc.u_bands, Number(bandsEl.value));
 
-  const aspect = (canvas.width / canvas.height);
+  // Ensure viewport matches full canvas size
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  
+  // Calculate aspect ratio from actual canvas buffer dimensions
+  const aspect = canvas.width / canvas.height;
+  console.log(`Rendering: ${canvas.width}x${canvas.height}, aspect: ${aspect.toFixed(3)}`);
+  
   let model = mat4Identity();
   if (spinEl.checked) model = mat4Mul(mat4RotateY(t*0.7), mat4RotateX(t*0.3));
   
@@ -943,7 +1008,13 @@ function frame(tMs){
   
   // Apply panning to the view matrix
   const view = mat4Translate(panX, panY, -3.6);
-  const proj = mat4Perspective(Math.PI/3, aspect, 0.1, 100);
+  
+  // Use wider FOV for larger displays to show more content
+  const baseFOV = Math.PI / 3; // 60 degrees
+  const fovMultiplier = Math.min(1.5, Math.max(1.0, canvas.width / 1200)); // Scale FOV with canvas width
+  const fov = baseFOV * fovMultiplier;
+  
+  const proj = mat4Perspective(fov, aspect, 0.1, 100);
 
   gl.uniformMatrix4fv(loc.u_view,  false, view);
   gl.uniformMatrix4fv(loc.u_proj,  false, proj);
