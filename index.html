@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>OBJ + Gaussian Bands — Bulletproof Baseline (+ wired sliders)</title>
+<title>OBJ + Gaussian Bands — Tessellation Mapper</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   :root { color-scheme: light dark; }
@@ -21,15 +21,56 @@
   #overlay { position:absolute; left:12px; top:12px; padding:8px 10px; border-radius:8px; background:#111a; border:1px solid #ffffff22; font:12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width:min(70ch, 90vw); white-space:pre-wrap; }
   .swatch { width:16px; height:16px; border-radius:3px; border:1px solid #0006; display:inline-block; margin-left:2px; }
   .mini { font-size:11px; opacity:.95; }
+  #tessPanel { position: fixed; right: 12px; top: 80px; width: 320px; max-height: calc(100vh - 100px); overflow-y: auto; background: #111319; border: 1px solid #ffffff17; border-radius: 12px; padding: 14px; display: none; z-index: 1000; }
+  #tessPanel.visible { display: block; }
+  #tessPanel h3 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; opacity:.85; margin: 12px 0 8px; }
+  #tessPanel .group { padding: 10px; border: 1px solid #ffffff18; border-radius: 8px; background: #0f1117; margin-bottom: 10px; }
+  #tessPanel .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin: 6px 0; }
+  #tessPanel .padWrap { background:#0a0c10; border:1px solid #ffffff18; border-radius:8px; padding:8px; margin: 8px 0; }
+  #tessPanel canvas#drawPad { display:block; width:256px; height:256px; background: #0d0f14; border-radius: 6px; cursor: crosshair; image-rendering: pixelated; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .closeBtn { position: absolute; top: 8px; right: 8px; background: #1a1a24; border: 1px solid #ffffff22; padding: 4px 8px; font-size: 11px; cursor: pointer; }
 </style>
 </head>
 <body>
   <header>
-    <!-- YOUR ORIGINAL CONTROLS (unchanged) -->
     <button id="reload">Reload OBJ</button>
     <input type="file" id="fileUpload" accept=".obj" style="margin-right: 10px;">
     <input type="file" id="backgroundUpload" accept=".obj" style="margin-right: 10px;" title="Upload Background OBJ">
     <button id="clearBackground" style="margin-right: 10px;">Clear Background</button>
+    
+    <span class="hr"></span>
+    <label class="mini">Main Object
+      <select id="mainObjMapping">
+        <option value="gaussian" selected>Gaussian</option>
+        <option value="drawpad">Drawpad Tiles</option>
+        <option value="pile_curved">Pile Curved</option>
+        <option value="uniform_waves">Uniform Waves</option>
+      </select>
+    </label>
+    <button id="configMainObj" class="mini" title="Configure tessellation">⚙️</button>
+    
+    <label class="mini">Background Objects
+      <select id="bgObjMapping">
+        <option value="gaussian" selected>Gaussian</option>
+        <option value="drawpad">Drawpad Tiles</option>
+        <option value="pile_curved">Pile Curved</option>
+        <option value="uniform_waves">Uniform Waves</option>
+      </select>
+    </label>
+    <button id="configBgObj" class="mini" title="Configure tessellation">⚙️</button>
+    
+    <label class="mini">Background Plane
+      <select id="bgPlaneMapping">
+        <option value="gaussian" selected>Gaussian</option>
+        <option value="drawpad">Drawpad Tiles</option>
+        <option value="pile_curved">Pile Curved</option>
+        <option value="uniform_waves">Uniform Waves</option>
+      </select>
+    </label>
+    <button id="configBgPlane" class="mini" title="Configure tessellation">⚙️</button>
+    <span class="hr"></span>
+    
     <label>Background 
       <select id="backgroundSelect">
         <option value="">Default</option>
@@ -51,7 +92,6 @@
     <label>Object Z <input id="objZ" type="range" min="-10" max="10" step="0.1" value="0" /></label>
     <span id="palette"></span>
 
-    <!-- NEW PANEL (now actually wired) -->
     <span class="hr"></span>
     <label class="mini">Use Gaussian Texture <input id="useTex" type="checkbox" checked/></label>
     <label class="mini">Tex Size <input id="texSize" type="number" min="128" max="4096" step="64" value="1024" style="width:74px;"></label>
@@ -130,13 +170,81 @@
     <div id="overlay" hidden></div>
   </main>
 
+  <!-- Tessellation Configuration Panel -->
+  <div id="tessPanel">
+    <button class="closeBtn" id="closeTessPanel">✕ Close</button>
+    <h3 id="tessPanelTitle">Tessellation Settings</h3>
+    
+    <!-- Drawpad Controls -->
+    <div id="drawpadControls" style="display:none;">
+      <div class="group">
+        <h3>Draw Your Tile</h3>
+        <div class="padWrap">
+          <canvas id="drawPad" width="256" height="256"></canvas>
+        </div>
+        <div class="two" style="margin-top:8px;">
+          <button id="clearPad">Clear</button>
+          <button id="noisePad">Noise</button>
+        </div>
+        <div class="row"><label>Brush Size</label><input id="brushSize" type="range" min="1" max="40" value="10"><span id="brushSizeV">10</span></div>
+        <div class="row"><label>Brush Color</label><input id="brushColor" type="color" value="#ffffff"></div>
+      </div>
+      
+      <div class="group">
+        <h3>Tiling Options</h3>
+        <div class="row">
+          <label>Grid Type</label>
+          <select id="gridType">
+            <option value="squares">Squares</option>
+            <option value="triangles">Triangles</option>
+            <option value="hexagons">Hexagons</option>
+          </select>
+        </div>
+        <div class="row"><label>Cell Size</label><input id="cellSize" type="range" min="16" max="220" value="80"><span id="cellSizeV">80</span></div>
+        <div class="row"><label>Tint %</label><input id="tintAmount" type="range" min="0" max="100" value="20"><span id="tintAmountV">20</span></div>
+      </div>
+      <button id="applyDrawpad" style="width:100%; margin-top:8px;">Apply Tessellation</button>
+    </div>
+    
+    <!-- Pile Curved Controls -->
+    <div id="pileCurvedControls" style="display:none;">
+      <div class="group">
+        <h3>Voronoi Cells</h3>
+        <div class="row"><label>Cell Count</label><input id="pileCount" type="range" min="20" max="400" value="150"><span id="pileCountV">150</span></div>
+        <div class="row"><label>Relax Iterations</label><input id="pileRelax" type="range" min="0" max="10" value="3"><span id="pileRelaxV">3</span></div>
+        <div class="row"><label>Jitter %</label><input id="pileJitter" type="range" min="0" max="50" value="8"><span id="pileJitterV">8</span></div>
+        <div class="row"><label>Smoothness</label><input id="pileSmooth" type="range" min="0" max="6" value="3"><span id="pileSmoothV">3</span></div>
+        <div class="row"><label>Roundness</label><input id="pileAlpha" type="range" min="0.05" max="0.45" step="0.01" value="0.25"><span id="pileAlphaV">0.25</span></div>
+      </div>
+      <button id="applyPileCurved" style="width:100%; margin-top:8px;">Apply Tessellation</button>
+    </div>
+    
+    <!-- Uniform Waves Controls -->
+    <div id="uniformWavesControls" style="display:none;">
+      <div class="group">
+        <h3>Pattern Settings</h3>
+        <div class="row">
+          <label>Shape Type</label>
+          <select id="waveShape">
+            <option value="wave">Wavelet</option>
+            <option value="spiral">Spiral</option>
+          </select>
+        </div>
+        <div class="row"><label>Spacing</label><input id="waveSpacing" type="range" min="20" max="260" value="100"><span id="waveSpacingV">100</span></div>
+        <div class="row"><label>Jitter</label><input id="waveJitter" type="range" min="0" max="120" value="30"><span id="waveJitterV">30</span></div>
+        <div class="row"><label>Length</label><input id="waveLength" type="range" min="20" max="400" value="120"><span id="waveLengthV">120</span></div>
+        <div class="row"><label>Amplitude</label><input id="waveAmp" type="range" min="2" max="120" value="20"><span id="waveAmpV">20</span></div>
+        <div class="row"><label>Thickness</label><input id="waveThick" type="range" min="1" max="24" value="6"><span id="waveThickV">6</span></div>
+      </div>
+      <button id="applyUniformWaves" style="width:100%; margin-top:8px;">Apply Tessellation</button>
+    </div>
+  </div>
+
 <script>
-/* === UTIL / STATUS === */
+/* ========== STATUS / CANVAS ========== */
 const overlay = document.getElementById('overlay');
 const statusEl = document.getElementById('status');
 function showError(msg){ overlay.hidden=false; overlay.textContent=msg; console.error(msg); }
-
-/* === BIG CANVAS === */
 const canvas = document.getElementById('glcanvas');
 const gl = canvas.getContext('webgl', { antialias: true });
 if (!gl) { showError('WebGL not available.'); throw new Error('No WebGL'); }
@@ -157,32 +265,65 @@ resizeCanvasToViewport();
 gl.viewport(0, 0, canvas.width, canvas.height);
 window.addEventListener('resize', () => { resizeCanvasToViewport(); gl.viewport(0, 0, canvas.width, canvas.height); });
 
-/* === SHADERS === */
+/* ========== SHADERS ========== */
+function compile(t,src){ const s=gl.createShader(t); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ throw new Error(gl.getShaderInfoLog(s)); } return s; }
+function link(vs,fs){ const p=gl.createProgram(); gl.attachShader(p,compile(gl.VERTEX_SHADER,vs)); gl.attachShader(p,compile(gl.FRAGMENT_SHADER,fs)); gl.linkProgram(p); if(!gl.getProgramParameter(p,gl.LINK_STATUS)){ throw new Error(gl.getProgramInfoLog(p)); } return p; }
+
 const VS = `
 precision highp float;
 attribute vec3 a_pos;
 attribute vec3 a_nrm;
+/* per-triangle local frame */
+attribute vec3 a_triO;
+attribute vec3 a_triE1;
+attribute vec3 a_triE2;
+
 uniform mat4 u_model, u_view, u_proj;
+uniform int  u_objectType;
+
 varying vec3 v_posW;
 varying vec3 v_nrmW;
+varying float v_objectType;
+
+/* pass the triangle frame in world space */
+varying vec3 v_triO;
+varying vec3 v_triE1;
+varying vec3 v_triE2;
+
 void main(){
   vec4 pw = u_model * vec4(a_pos, 1.0);
   v_posW = pw.xyz;
   v_nrmW = mat3(u_model) * a_nrm;
+  v_objectType = float(u_objectType);
+  v_triO  = (u_model * vec4(a_triO, 1.0)).xyz;
+  v_triE1 = mat3(u_model) * a_triE1;
+  v_triE2 = mat3(u_model) * a_triE2;
   gl_Position = u_proj * u_view * pw;
 }`;
+
 const FS = `
 precision mediump float;
 varying vec3 v_posW;
 varying vec3 v_nrmW;
+varying float v_objectType;
+varying vec3 v_triO, v_triE1, v_triE2;
+
 uniform float u_time, u_scale, u_bands;
 uniform int   u_octaves;
 uniform vec3  u_pal[8];
 uniform int   u_palSize;
+
 uniform bool  u_useTex;
-uniform sampler2D u_tex;
+uniform sampler2D u_mainTex;
+uniform sampler2D u_bgObjTex;
+uniform sampler2D u_bgPlaneTex;
 uniform float u_texScale;
 
+uniform int u_mainMapping;    // 0=gaussian, 1=drawpad, 2=pile, 3=waves
+uniform int u_bgObjMapping;
+uniform int u_bgPlaneMapping;
+
+/* Gaussian fbm for bands */
 float hash(vec3 p){ p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3)); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y*p.z)); }
 float noise(vec3 p){
   vec3 i=floor(p), f=fract(p);
@@ -194,9 +335,8 @@ float noise(vec3 p){
   return mix(nxy0,nxy1,u.z);
 }
 float fbm(vec3 p, int oct){ float a=0.0, amp=0.5; for(int i=0;i<8;i++){ if(i>=oct)break; a+=noise(p)*amp; p*=2.0; amp*=0.5; } return a; }
-vec3 fetchPalConst(int k){
-  if(k<0)k=0; if(k>7)k=7;
-  vec3 c=u_pal[0];
+
+vec3 fetchPalConst(int k){ if(k<0)k=0; if(k>7)k=7; vec3 c=u_pal[0];
   if(k==1)c=u_pal[1]; else if(k==2)c=u_pal[2]; else if(k==3)c=u_pal[3];
   else if(k==4)c=u_pal[4]; else if(k==5)c=u_pal[5]; else if(k==6)c=u_pal[6]; else if(k==7)c=u_pal[7];
   return c;
@@ -204,36 +344,47 @@ vec3 fetchPalConst(int k){
 vec3 bandPalette(float t){
   float bandF=floor(t*u_bands);
   float idxF=mod(bandF,float(u_palSize));
-  int idx=int(idxF);
-  return fetchPalConst(idx);
+  return fetchPalConst(int(idxF));
 }
-vec3 sampleTriPlanar(vec3 p, vec3 n){
-  vec3 an=abs(n)+1e-5; an/= (an.x+an.y+an.z);
-  vec2 uvX=fract(p.yz/u_texScale), uvY=fract(p.xz/u_texScale), uvZ=fract(p.xy/u_texScale);
-  vec3 cx=texture2D(u_tex,uvX).rgb, cy=texture2D(u_tex,uvY).rgb, cz=texture2D(u_tex,uvZ).rgb;
-  return cx*an.x + cy*an.y + cz*an.z;
+
+/* sample a 2D texture in triangle local frame (sticks to faces) */
+vec3 sampleTriUV(sampler2D tex, vec3 pW){
+  vec3 e1 = normalize(v_triE1);
+  vec3 e2 = normalize(v_triE2);
+  vec2 uv2 = vec2(dot(pW - v_triO, e1), dot(pW - v_triO, e2));
+  vec2 uv = fract(uv2 / max(1.0, u_texScale));
+  return texture2D(tex, uv).rgb;
 }
+
 void main(){
-  vec3 N=normalize(v_nrmW);
-  vec3 L=normalize(vec3(0.6,0.7,0.5));
-  float ndotl=max(dot(N,L),0.05);
-
-  vec3 P=v_posW*u_scale + vec3(u_time*0.05,0.0,0.0);
-  float f=clamp(fbm(P,u_octaves),0.0,0.9999);
+  vec3 P = v_posW * u_scale;
+  float f = clamp(fbm(P, u_octaves), 0.0, 0.9999);
   vec3 col = bandPalette(f);
-  if (u_useTex) col = sampleTriPlanar(v_posW, N);
 
-  gl_FragColor = vec4(col * ndotl, 1.0);
+  if (u_useTex) {
+    int objType = int(v_objectType);
+    if (objType == 0) {
+      if (u_mainMapping != 0) col = sampleTriUV(u_mainTex, v_posW);
+    } else if (objType == 1) {
+      if (u_bgObjMapping != 0) col = sampleTriUV(u_bgObjTex, v_posW);
+    } else {
+      if (u_bgPlaneMapping != 0) col = sampleTriUV(u_bgPlaneTex, v_posW);
+    }
+  }
+
+  gl_FragColor = vec4(col, 1.0); /* flat, no shadows */
 }`;
-function compile(t,src){ const s=gl.createShader(t); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ const m=gl.getShaderInfoLog(s); showError('Shader compile error:\n'+m); throw new Error(m);} return s; }
-function link(vs,fs){ const p=gl.createProgram(); gl.attachShader(p,compile(gl.VERTEX_SHADER,vs)); gl.attachShader(p,compile(gl.FRAGMENT_SHADER,fs)); gl.linkProgram(p); if(!gl.getProgramParameter(p,gl.LINK_STATUS)){ const m=gl.getProgramInfoLog(p); showError('Program link error:\n'+m); throw new Error(m);} return p; }
+
 const prog = link(VS, FS);
 gl.useProgram(prog);
 
-/* === LOCATIONS === */
+/* ========== LOCATIONS ========== */
 const loc = {
   a_pos: gl.getAttribLocation(prog,'a_pos'),
   a_nrm: gl.getAttribLocation(prog,'a_nrm'),
+  a_triO:  gl.getAttribLocation(prog,'a_triO'),
+  a_triE1: gl.getAttribLocation(prog,'a_triE1'),
+  a_triE2: gl.getAttribLocation(prog,'a_triE2'),
   u_model: gl.getUniformLocation(prog,'u_model'),
   u_view: gl.getUniformLocation(prog,'u_view'),
   u_proj: gl.getUniformLocation(prog,'u_proj'),
@@ -244,11 +395,17 @@ const loc = {
   u_pal: gl.getUniformLocation(prog,'u_pal[0]'),
   u_palSize: gl.getUniformLocation(prog,'u_palSize'),
   u_useTex: gl.getUniformLocation(prog,'u_useTex'),
-  u_tex: gl.getUniformLocation(prog,'u_tex'),
+  u_mainTex: gl.getUniformLocation(prog,'u_mainTex'),
+  u_bgObjTex: gl.getUniformLocation(prog,'u_bgObjTex'),
+  u_bgPlaneTex: gl.getUniformLocation(prog,'u_bgPlaneTex'),
   u_texScale: gl.getUniformLocation(prog,'u_texScale'),
+  u_objectType: gl.getUniformLocation(prog,'u_objectType'),
+  u_mainMapping: gl.getUniformLocation(prog,'u_mainMapping'),
+  u_bgObjMapping: gl.getUniformLocation(prog,'u_bgObjMapping'),
+  u_bgPlaneMapping: gl.getUniformLocation(prog,'u_bgPlaneMapping'),
 };
 
-/* === MATH === */
+/* ========== MATH ========== */
 function mat4Identity(){return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];}
 function mat4Mul(a,b){ const o=new Float32Array(16); for(let r=0;r<4;r++){ for(let c=0;c<4;c++){ o[r*4+c]=a[r*4+0]*b[0*4+c]+a[r*4+1]*b[1*4+c]+a[r*4+2]*b[2*4+c]+a[r*4+3]*b[3*4+c]; } } return o; }
 function mat4Translate(x,y,z){return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);}
@@ -256,7 +413,7 @@ function mat4RotateY(a){const c=Math.cos(a),s=Math.sin(a);return new Float32Arra
 function mat4RotateX(a){const c=Math.cos(a),s=Math.sin(a);return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);}
 function mat4Perspective(fov, asp, n, f){const t=1/Math.tan(fov/2);return new Float32Array([t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)/(n-f),-1, 0,0,(2*f*n)/(n-f),0]);}
 
-/* === ORIGINAL PALETTE + NEW PALETTE LAB === */
+/* ========== PALETTE (unchanged core, wired to uniforms) ========== */
 function hslToRgb(h,s,l){ s/=100; l/=100; const k=n=>(n+h/30)%12; const a=s*Math.min(l,1-l); const f=n=> l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1))); return [f(0),f(8),f(4)].map(v=>Math.round(v*255)); }
 function triadicPalette(hue=0, n=8, sat=70, lit=55){ const offs=[0,120,240,60,300,180,30,330]; const cols=[]; for(let i=0;i<n;i++){ const h=(hue+offs[i%offs.length])%360; const [r,g,b]=hslToRgb(h, sat, lit); cols.push([r/255,g/255,b/255]); } return cols; }
 function setPalette(hue){
@@ -268,7 +425,6 @@ function setPalette(hue){
 }
 setPalette(Number(document.getElementById('hue').value));
 
-/* palette lab helpers that now ALSO feed the shader */
 const clamp=(v,lo,hi)=>Math.min(hi,Math.max(lo,v));
 const normHue=h=>((h%360)+360)%360;
 const randRange=(a,b)=>a+Math.random()*(b-a);
@@ -289,13 +445,11 @@ function adjustPalette(hexList,{adjHue,adjSat,adjBright,adjContrast}){
     h=normHue(h+adjHue); s=clamp(s*adjSat,0,100); l=clamp(50+(l-50)*adjContrast+adjBright,0,100); return hslToHex(h,s,l);
   });
 }
-/* feed palette to the shader (so bands path changes immediately) */
 function applyActivePaletteToShader(hexList){
   const cols = hexList.slice(0,8).map(hexToRgb01);
   const flat = new Float32Array(cols.flat());
   gl.uniform1i(loc.u_palSize, cols.length);
   gl.uniform3fv(loc.u_pal, flat);
-  // update swatches HUD
   const sw = document.getElementById('palette'); sw.innerHTML='';
   for (let i=0;i<Math.min(5, cols.length); i++){
     const [r,g,b]=cols[i].map(v=>Math.round(v*255));
@@ -303,7 +457,7 @@ function applyActivePaletteToShader(hexList){
   }
 }
 
-/* === GEOMETRY / OBJ === */
+/* ========== GEOMETRY / OBJ LOADING ========== */
 function normalize(v){ const L=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/L,v[1]/L,v[2]/L]; }
 function icosphereFlat(subdiv=2){
   const t=(1+Math.sqrt(5))/2;
@@ -331,15 +485,12 @@ async function loadOBJFlat(url){
   return { pos:new Float32Array(pos), nrm:new Float32Array(nrm) };
 }
 
-/* === BUFFERS + WIREFRAME === */
+/* ========== BUFFERS, TRI-FRAMES, WIRE ========== */
 const vboPos=gl.createBuffer(), vboNrm=gl.createBuffer();
-function uploadGeometryFlat(geo){
-  gl.bindBuffer(gl.ARRAY_BUFFER, vboPos); gl.bufferData(gl.ARRAY_BUFFER, geo.pos, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(loc.a_pos); gl.vertexAttribPointer(loc.a_pos,3,gl.FLOAT,false,0,0);
-  gl.bindBuffer(gl.ARRAY_BUFFER, vboNrm); gl.bufferData(gl.ARRAY_BUFFER, geo.nrm, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(loc.a_nrm); gl.vertexAttribPointer(loc.a_nrm,3,gl.FLOAT,false,0,0);
-  buildWireFromGeo(geo);
-}
+const vboTriO  = gl.createBuffer();
+const vboTriE1 = gl.createBuffer();
+const vboTriE2 = gl.createBuffer();
+
 let wireVbo=gl.createBuffer(), wireCount=0;
 function buildWireFromGeo(geo){
   const v=geo.pos; const out=new Float32Array((v.length/9)*18); let o=0;
@@ -353,7 +504,75 @@ function buildWireFromGeo(geo){
   wireCount = out.length/3;
 }
 
-/* === ORIGINAL CONTROLS === */
+function computeTriFrames(geo){
+  if (geo._triO && geo._triE1 && geo._triE2) return geo;
+  const pos = geo.pos;
+  const triO  = new Float32Array(pos.length);
+  const triE1 = new Float32Array(pos.length);
+  const triE2 = new Float32Array(pos.length);
+  for (let i = 0; i < pos.length; i += 9) {
+    const ax = pos[i+0], ay = pos[i+1], az = pos[i+2];
+    const bx = pos[i+3], by = pos[i+4], bz = pos[i+5];
+    const cx = pos[i+6], cy = pos[i+7], cz = pos[i+8];
+
+    const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+    const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+
+    const len1 = Math.hypot(e1x,e1y,e1z) || 1.0;
+    let t1x = e1x/len1, t1y = e1y/len1, t1z = e1z/len1;
+
+    const dot12 = t1x*e2x + t1y*e2y + t1z*e2z;
+    let u2x = e2x - dot12*t1x, u2y = e2y - dot12*t1y, u2z = e2z - dot12*t1z;
+    const len2 = Math.hypot(u2x,u2y,u2z) || 1.0;
+    let t2x = u2x/len2, t2y = u2y/len2, t2z = u2z/len2;
+
+    for (let k = 0; k < 3; k++) {
+      const base = i + k*3;
+      triO[base+0]  = ax; triO[base+1]  = ay; triO[base+2]  = az;
+      triE1[base+0] = t1x;triE1[base+1] = t1y;triE1[base+2] = t1z;
+      triE2[base+0] = t2x;triE2[base+1] = t2y;triE2[base+2] = t2z;
+    }
+  }
+  geo._triO = triO; geo._triE1 = triE1; geo._triE2 = triE2;
+  return geo;
+}
+
+function bindGeo(geo){
+  computeTriFrames(geo);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboPos);
+  gl.bufferData(gl.ARRAY_BUFFER, geo.pos, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc.a_pos);
+  gl.vertexAttribPointer(loc.a_pos,3,gl.FLOAT,false,0,0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboNrm);
+  gl.bufferData(gl.ARRAY_BUFFER, geo.nrm, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc.a_nrm);
+  gl.vertexAttribPointer(loc.a_nrm,3,gl.FLOAT,false,0,0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboTriO);
+  gl.bufferData(gl.ARRAY_BUFFER, geo._triO, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc.a_triO);
+  gl.vertexAttribPointer(loc.a_triO,3,gl.FLOAT,false,0,0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboTriE1);
+  gl.bufferData(gl.ARRAY_BUFFER, geo._triE1, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc.a_triE1);
+  gl.vertexAttribPointer(loc.a_triE1,3,gl.FLOAT,false,0,0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboTriE2);
+  gl.bufferData(gl.ARRAY_BUFFER, geo._triE2, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc.a_triE2);
+  gl.vertexAttribPointer(loc.a_triE2,3,gl.FLOAT,false,0,0);
+}
+
+function uploadGeometryFlat(geo){
+  computeTriFrames(geo);
+  bindGeo(geo);
+  buildWireFromGeo(geo);
+}
+
+/* ========== CONTROLS ========== */
 const bandsEl = document.getElementById('bands');
 const scaleEl = document.getElementById('scale');
 const octEl   = document.getElementById('octaves');
@@ -365,7 +584,7 @@ const objZEl  = document.getElementById('objZ');
 document.getElementById('reload').addEventListener('click', loadModel);
 hueEl.addEventListener('input', ()=> setPalette(Number(hueEl.value)));
 
-/* === NEW CONTROLS === */
+/* palette lab inputs (used by texture gen too) */
 const useTexEl   = document.getElementById('useTex');
 const texSizeEl  = document.getElementById('texSize');
 const gScaleEl   = document.getElementById('gScale');
@@ -399,11 +618,10 @@ const adjContrastEl=document.getElementById('adjContrast');
 let showWire=false;
 document.getElementById('wireToggle').addEventListener('click', (e)=>{ showWire=!showWire; e.target.textContent=`Wire: ${showWire?'On':'Off'}`; });
 document.getElementById('resetCam').addEventListener('click', ()=>{
-  panX=0; panY=0;
-  objXEl.value=0; objYEl.value=0; objZEl.value=0;
+  panX=0; panY=0; objXEl.value=0; objYEl.value=0; objZEl.value=0;
 });
 
-/* === FILE UPLOAD === (yours) */
+/* ========== FILE UPLOADS ========== */
 function centerAndScaleVertices(vertices){
   if(!vertices.length) return [];
   let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
@@ -434,7 +652,7 @@ document.getElementById('fileUpload').addEventListener('change', async (e)=>{
   catch(err){ statusEl.textContent=`Upload failed: ${err.message}`; overlay.hidden=false; overlay.textContent=`Upload failed: ${err.message}\nUsing current geometry.`; }
 });
 
-/* === LOAD DEFAULT MODEL === */
+/* ========== DEFAULT MODEL ========== */
 let geo = icosphereFlat(2);
 uploadGeometryFlat(geo);
 async function loadModel(){
@@ -444,25 +662,24 @@ async function loadModel(){
 }
 loadModel();
 
-/* === GAUSSIAN TEXTURE (CPU) -> GL === */
-let glTex = gl.createTexture();
+/* ========== GAUSSIAN TEXTURE GEN ========== */
+let glTex = gl.createTexture();     // shared backing (we upload images into it)
 let activeTex = null;
 function wrapIndex(i,n,mode){ if(mode==='repeat') return ((i%n)+n)%n; if(mode==='clamp') return Math.max(0,Math.min(n-1,i)); const period=2*(n-1); let t=i%period; if(t<0) t+=period; return t<=(n-1)?t:period-t; }
 function randn(){ let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
 function generateField(w,h){ const f=new Float32Array(w*h); for(let i=0;i<f.length;i++) f[i]=randn(); return f; }
 function gaussianKernel1D(s){ if(s<=0) return {k:new Float32Array([1]), r:0}; const r=Math.max(1,Math.floor(s*3)); const size=r*2+1, k=new Float32Array(size); const s2=2*s*s; let sum=0; for(let i=-r,j=0;i<=r;i++,j++){ const val=Math.exp(-(i*i)/s2); k[j]=val; sum+=val; } for(let j=0;j<size;j++) k[j]/=sum; return {k,r}; }
-function convolveH(src,w,h,{k,r}){ if(r===0) return src.slice(0); const out=new Float32Array(src.length); for(let y=0;y<h;y++){ const row=y*w; for(let x=0;x<w;x++){ let acc=0; for(let i=-r;i<=r;i++){ const xx=Math.min(w-1,Math.max(0,x+i)); acc+=src[row+xx]*k[i+r]; } out[row+x]=acc; } } return out; }
-function convolveV(src,w,h,{k,r}){ if(r===0) return src.slice(0); const out=new Float32Array(src.length); for(let x=0;x<w;x++){ for(let y=0;y<h;y++){ let acc=0; for(let i=-r;i<=r;i++){ const yy=Math.min(h-1,Math.max(0,y+i)); acc+=src[yy*w+x]*k[i+r]; } out[y*w+x]=acc; } } return out; }
+function convolveH(src,w,h,{k,r}){ if(r===0) return src.slice(0); const out=new Float32Array(src.length); for(let y=0;y<h;y++){ const row=y*w; for(let x=0;x<w;x++){ let acc=0.0; for(let i=-r;i<=r;i++){ const xx=Math.min(w-1,Math.max(0,x+i)); acc+=src[row+xx]*k[i+r]; } out[row+x]=acc; } } return out; }
+function convolveV(src,w,h,{k,r}){ if(r===0) return src.slice(0); const out=new Float32Array(src.length); for(let x=0;x<w;x++){ for(let y=0;y<h;y++){ let acc=0.0; for(let i=-r;i<=r;i++){ const yy=Math.min(h-1,Math.max(0,y+i)); acc+=src[yy*w+x]*k[i+r]; } out[y*w+x]=acc; } } return out; }
 function normalize01(a){ let mn=Infinity,mx=-Infinity; for(const v of a){ if(v<mn)mn=v; if(v>mx)mx=v; } const rng=mx-mn||1; const out=new Float32Array(a.length); for(let i=0;i<a.length;i++) out[i]=(a[i]-mn)/rng; return out; }
 function applyBandGamma(a,g){ const o=new Float32Array(a.length); for(let i=0;i<a.length;i++) o[i]=Math.pow(a[i],g); return o; }
-function addDither(a,amt){ if(amt<=0) return a; const o=new Float32Array(a.length); for(let i=0;i<a.length;i++) o[i]=clamp(a[i]+(Math.random()-0.5)*amt,0,1); return o; }
 function quantizeToBands(a,B){ B=Math.max(1,B|0); const q=new Uint16Array(a.length); for(let i=0;i<a.length;i++){ let idx=Math.floor(a[i]*B); if(idx>=B) idx=B-1; q[i]=idx; } return q; }
 async function makeGaussianBitmap(palHex, params){
-  const {sigma,scale,bands,bandGamma,dither,wrap,texSize}=params;
+  const {sigma,scale,bands,bandGamma,wrap,texSize}=params;
   const w=Math.max(64, Math.floor(texSize/scale)), h=w;
   let field=generateField(w,h); const kernel=gaussianKernel1D(sigma);
   field=convolveH(field,w,h,kernel); field=convolveV(field,w,h,kernel);
-  let a01=normalize01(field); a01=applyBandGamma(a01,bandGamma); a01=addDither(a01,dither);
+  let a01=normalize01(field); a01=applyBandGamma(a01,bandGamma);
   const q=quantizeToBands(a01,bands);
 
   const off=document.createElement('canvas'); off.width=w; off.height=h; const octx=off.getContext('2d');
@@ -474,7 +691,7 @@ async function makeGaussianBitmap(palHex, params){
   const o2=out.getContext('2d'); o2.imageSmoothingEnabled=true; o2.drawImage(off,0,0,texSize,texSize);
   return await createImageBitmap(out);
 }
-function readGaussianUI(){ return { sigma:+gSigmaEl.value, scale:+gScaleEl.value, bands:+gBandsEl.value, bandGamma:+gGammaEl.value, dither:+gDitherEl.value, wrap:gWrapEl.value, texSize:+texSizeEl.value }; }
+function readGaussianUI(){ return { sigma:+gSigmaEl.value, scale:+gScaleEl.value, bands:+gBandsEl.value, bandGamma:+gGammaEl.value, wrap:gWrapEl.value, texSize:+texSizeEl.value }; }
 function readPaletteUI(){ return {
   palSize:+palSizeEl.value, hueSeed:+hueSeedEl.value, hueMode:hueModeEl.value, customOffsets:offsetsEl.value,
   hueRot:+hueRotEl.value, hueJitterDeg:+hueJitterEl.value,
@@ -485,12 +702,11 @@ function readAdjustUI(){ return { adjHue:+adjHueEl.value, adjSat:+adjSatEl.value
 
 let lastPalHex = [];
 async function rebuildTexture(){
-  // build active palette hex list and feed BOTH: GL palette uniforms & texture generator
   const base = generatePaletteStruct(readPaletteUI());
   const palHex = adjustPalette(base, readAdjustUI());
   lastPalHex = palHex;
-  applyActivePaletteToShader(palHex);      // <-- bands path immediately reflects changes
-  activeTex = await makeGaussianBitmap(palHex, readGaussianUI()); // <-- new bitmap
+  applyActivePaletteToShader(palHex);
+  activeTex = await makeGaussianBitmap(palHex, readGaussianUI());
   gl.bindTexture(gl.TEXTURE_2D, glTex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,activeTex);
@@ -511,7 +727,7 @@ document.getElementById('newSeed').addEventListener('click', ()=>{ hueSeedEl.val
   adjHueEl, adjSatEl, adjBrightEl, adjContrastEl
 ].forEach(el=> el.addEventListener('input', rebuildTexture));
 
-/* === BACKGROUNDS / TERRAIN (yours; intact) === */
+/* ========== BACKGROUNDS / TERRAIN (unchanged behavior) ========== */
 let currentBackground=null;
 let backgroundColors=[0.07,0.06,0.10];
 function hexToRgb(hex){ const m=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return m?[parseInt(m[1],16)/255,parseInt(m[2],16)/255,parseInt(m[3],16)/255]:[0,0,0]; }
@@ -565,7 +781,7 @@ async function loadTerrain(list){ const objs=[]; if(!list||!Array.isArray(list))
   } return objs;
 }
 
-/* === RENDER LOOP === */
+/* ========== RENDER LOOP ========== */
 gl.enable(gl.DEPTH_TEST);
 let panX=0, panY=0, isDragging=false, lastMouseX=0, lastMouseY=0;
 canvas.addEventListener('mousedown', e=>{ isDragging=true; lastMouseX=e.clientX; lastMouseY=e.clientY; canvas.style.cursor='grabbing'; });
@@ -574,6 +790,11 @@ canvas.addEventListener('mouseup', ()=>{ isDragging=false; canvas.style.cursor='
 canvas.addEventListener('mouseleave', ()=>{ isDragging=false; canvas.style.cursor='default'; });
 canvas.style.cursor='grab';
 
+/* --- per-target texture handles (what you asked for) --- */
+let texMain = null;     // sampler0
+let texBgObj = null;    // sampler1
+let texBgPlane = null;  // sampler2
+
 function frame(tMs){
   const t=tMs*0.001;
   gl.useProgram(prog);
@@ -581,6 +802,11 @@ function frame(tMs){
   gl.uniform1f(loc.u_scale, Number(scaleEl.value));
   gl.uniform1i(loc.u_octaves, Number(octEl.value));
   gl.uniform1f(loc.u_bands, Number(bandsEl.value));
+
+  const mappingToInt = {gaussian: 0, drawpad: 1, pile_curved: 2, uniform_waves: 3};
+  gl.uniform1i(loc.u_mainMapping, mappingToInt[document.getElementById('mainObjMapping').value] || 0);
+  gl.uniform1i(loc.u_bgObjMapping, mappingToInt[document.getElementById('bgObjMapping').value] || 0);
+  gl.uniform1i(loc.u_bgPlaneMapping, mappingToInt[document.getElementById('bgPlaneMapping').value] || 0);
 
   gl.viewport(0,0,canvas.width,canvas.height);
   const aspect=canvas.width/canvas.height;
@@ -595,20 +821,29 @@ function frame(tMs){
   gl.uniformMatrix4fv(loc.u_view,false,view);
   gl.uniformMatrix4fv(loc.u_proj,false,proj);
 
-  // texture uniforms
   gl.uniform1i(loc.u_useTex, !!useTexEl.checked);
   gl.uniform1f(loc.u_texScale, Math.max(1.0, +gScaleEl.value));
-  if (useTexEl.checked && activeTex){
+
+  if (useTexEl.checked) {
+    // Main
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, glTex);
-    gl.uniform1i(loc.u_tex, 0);
+    gl.bindTexture(gl.TEXTURE_2D, texMain || glTex);
+    gl.uniform1i(loc.u_mainTex, 0);
+    // Bg objects
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texBgObj || glTex);
+    gl.uniform1i(loc.u_bgObjTex, 1);
+    // Bg plane
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, texBgPlane || glTex);
+    gl.uniform1i(loc.u_bgPlaneTex, 2);
   }
 
-  // clear
   gl.clearColor(backgroundColors[0],backgroundColors[1],backgroundColors[2],1);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
 
-  // background objects first
+  // background objects
+  gl.uniform1i(loc.u_objectType, 1);
   for(const bg of backgroundObjects){
     if(!bg.geometry||!bg.geometry.pos) continue;
     let M=mat4Identity();
@@ -616,23 +851,17 @@ function frame(tMs){
     if(bg.rotation){ M=mat4Mul(M, mat4RotateY(bg.rotation[1]||0)); M=mat4Mul(M, mat4RotateX(bg.rotation[0]||0)); }
     if(bg.scale){ const s=bg.scale; const S=new Float32Array([s[0],0,0,0, 0,s[1],0,0, 0,0,s[2],0, 0,0,0,1]); M=mat4Mul(M,S); }
     gl.uniformMatrix4fv(loc.u_model,false,M);
-    gl.bindBuffer(gl.ARRAY_BUFFER, vboPos); gl.bufferData(gl.ARRAY_BUFFER, bg.geometry.pos, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(loc.a_pos); gl.vertexAttribPointer(loc.a_pos,3,gl.FLOAT,false,0,0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, vboNrm); gl.bufferData(gl.ARRAY_BUFFER, bg.geometry.nrm, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(loc.a_nrm); gl.vertexAttribPointer(loc.a_nrm,3,gl.FLOAT,false,0,0);
+    bindGeo(bg.geometry);
     gl.drawArrays(gl.TRIANGLES, 0, bg.geometry.pos.length/3);
   }
 
-  // main geo
+  // main object
+  gl.uniform1i(loc.u_objectType, 0);
   gl.uniformMatrix4fv(loc.u_model,false,model);
-  gl.bindBuffer(gl.ARRAY_BUFFER, vboPos); gl.bufferData(gl.ARRAY_BUFFER, geo.pos, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(loc.a_pos); gl.vertexAttribPointer(loc.a_pos,3,gl.FLOAT,false,0,0);
-  gl.bindBuffer(gl.ARRAY_BUFFER, vboNrm); gl.bufferData(gl.ARRAY_BUFFER, geo.nrm, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(loc.a_nrm); gl.vertexAttribPointer(loc.a_nrm,3,gl.FLOAT,false,0,0);
+  bindGeo(geo);
   const vertCount=geo.pos.length/3;
   gl.drawArrays(gl.TRIANGLES, 0, vertCount);
 
-  // wire overlay (1px in WebGL1)
   if (showWire){
     gl.bindBuffer(gl.ARRAY_BUFFER, wireVbo);
     gl.vertexAttribPointer(loc.a_pos,3,gl.FLOAT,false,0,0);
@@ -640,17 +869,232 @@ function frame(tMs){
     gl.drawArrays(gl.LINES, 0, wireCount);
   }
 
-  statusEl.textContent = `verts:${vertCount} | pan:[${panX.toFixed(2)},${panY.toFixed(2)}]`+
-    (currentBackground?` | bg:${currentBackground.name||'scenic'}`:'')+
-    (backgroundObjects.length?` | bgObjs:${backgroundObjects.length}`:'')+
-    ` | bands:${bandsEl.value} scale:${scaleEl.value} oct:${octEl.value}`+
-    (useTexEl.checked?` | tex:${texSizeEl.value}px σ:${gSigmaEl.value} bands:${gBandsEl.value}`:'');
+  statusEl.textContent = `verts:${vertCount} | bands:${bandsEl.value} scale:${scaleEl.value} oct:${octEl.value}`;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-/* initial palette + texture so sliders are live immediately */
+/* initial palette + texture */
 (async ()=>{ await rebuildTexture(); })();
+
+/* ========== TESSELLATION SYSTEM (Apply maps to the chosen target) ========== */
+const tessPanel = document.getElementById('tessPanel');
+const tessPanelTitle = document.getElementById('tessPanelTitle');
+let currentTessTarget = 'main'; // 'main' | 'bgObj' | 'bgPlane'
+let currentTessType   = 'drawpad'; // which generator UI is open
+
+/* Hook up config buttons */
+document.getElementById('configMainObj').addEventListener('click', () => {
+  currentTessTarget = 'main';
+  const type = document.getElementById('mainObjMapping').value;
+  currentTessType = type === 'gaussian' ? 'drawpad' : type;
+  showTessPanel('Main Object', currentTessType);
+});
+document.getElementById('configBgObj').addEventListener('click', () => {
+  currentTessTarget = 'bgObj';
+  const type = document.getElementById('bgObjMapping').value;
+  currentTessType = type === 'gaussian' ? 'drawpad' : type;
+  showTessPanel('Background Objects', currentTessType);
+});
+document.getElementById('configBgPlane').addEventListener('click', () => {
+  currentTessTarget = 'bgPlane';
+  const type = document.getElementById('bgPlaneMapping').value;
+  currentTessType = type === 'gaussian' ? 'drawpad' : type;
+  showTessPanel('Background Plane', currentTessType);
+});
+
+/* If user changes dropdown to non-gaussian, open the panel */
+['mainObjMapping','bgObjMapping','bgPlaneMapping'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', e=>{
+    const v = e.target.value;
+    if (v !== 'gaussian') {
+      currentTessType = v;
+      currentTessTarget = id === 'mainObjMapping' ? 'main' : (id === 'bgObjMapping' ? 'bgObj' : 'bgPlane');
+      showTessPanel(
+        id==='mainObjMapping'?'Main Object':(id==='bgObjMapping'?'Background Objects':'Background Plane'),
+        v
+      );
+    }
+  });
+});
+
+function showTessPanel(label, type) {
+  tessPanel.classList.add('visible');
+  tessPanelTitle.textContent = `${label} — ${type.replace('_', ' ')}`;
+  document.getElementById('drawpadControls').style.display = type === 'drawpad' ? 'block' : 'none';
+  document.getElementById('pileCurvedControls').style.display = type === 'pile_curved' ? 'block' : 'none';
+  document.getElementById('uniformWavesControls').style.display = type === 'uniform_waves' ? 'block' : 'none';
+}
+document.getElementById('closeTessPanel').addEventListener('click', ()=> tessPanel.classList.remove('visible'));
+
+/* Drawpad UI */
+const drawPad = document.getElementById('drawPad');
+const dctx = drawPad.getContext('2d');
+dctx.lineCap = 'round'; dctx.lineJoin = 'round';
+let drawing=false, lastPos=null;
+drawPad.addEventListener('pointerdown', e => {
+  const rect = drawPad.getBoundingClientRect();
+  drawing = true;
+  lastPos = [(e.clientX - rect.left) * (drawPad.width / rect.width),
+             (e.clientY - rect.top)  * (drawPad.height / rect.height)];
+});
+window.addEventListener('pointerup', () => drawing = false);
+drawPad.addEventListener('pointermove', e => {
+  if (!drawing) return;
+  const rect = drawPad.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (drawPad.width / rect.width);
+  const y = (e.clientY - rect.top)  * (drawPad.height / rect.height);
+  dctx.strokeStyle = document.getElementById('brushColor').value;
+  dctx.lineWidth   = +document.getElementById('brushSize').value;
+  const offsets = [[0,0], [256,0], [-256,0], [0,256], [0,-256]];
+  for (const [ox, oy] of offsets) {
+    dctx.beginPath();
+    dctx.moveTo(lastPos[0] + ox, lastPos[1] + oy);
+    dctx.lineTo(x + ox, y + oy);
+    dctx.stroke();
+  }
+  lastPos=[x,y];
+});
+document.getElementById('brushSize').addEventListener('input', e => (document.getElementById('brushSizeV').textContent = e.target.value));
+document.getElementById('cellSize').addEventListener('input', e => (document.getElementById('cellSizeV').textContent = e.target.value));
+document.getElementById('clearPad').addEventListener('click', () => dctx.clearRect(0, 0, drawPad.width, drawPad.height));
+document.getElementById('noisePad').addEventListener('click', () => {
+  const imgData = dctx.createImageData(drawPad.width, drawPad.height);
+  const data = imgData.data;
+  for (let i=0;i<data.length;i+=4){ const v=(Math.random()*255)|0; data[i]=data[i+1]=data[i+2]=v; data[i+3]=255; }
+  dctx.putImageData(imgData, 0, 0);
+});
+
+/* Number read helpers */
+function readInt(id, d){ const v=+document.getElementById(id).value; return Number.isFinite(v)?v:d; }
+function readStr(id, d){ const el=document.getElementById(id); return el?el.value:d; }
+
+/* Generators */
+async function generateDrawpadTexture() {
+  const size = +document.getElementById('texSize').value || 1024;
+  const cellSize = +document.getElementById('cellSize').value || 80;
+  const tintPct = +document.getElementById('tintAmount').value || 0;
+
+  const c = document.createElement('canvas'); c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#10131a'; ctx.fillRect(0,0,size,size);
+
+  // Tile the drawpad with optional tint stripes from palette
+  const pal = lastPalHex.length ? lastPalHex : ['#bbb','#888','#555'];
+  for (let y=0;y<size;y+=cellSize){
+    for (let x=0;x<size;x+=cellSize){
+      ctx.drawImage(drawPad, x, y, cellSize, cellSize);
+      if (tintPct>0){
+        ctx.fillStyle = pal[((x+y)/cellSize|0)%pal.length];
+        ctx.globalAlpha = tintPct/100;
+        ctx.fillRect(x,y,cellSize,cellSize);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+  return await createImageBitmap(c);
+}
+async function generatePileCurvedTexture() {
+  const size = +document.getElementById('texSize').value || 1024;
+  const count = readInt('pileCount', 150);
+  const c = document.createElement('canvas'); c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  const sites = Array.from({length: count}, () => ({x: Math.random()*size, y: Math.random()*size}));
+  const colors = lastPalHex.length ? lastPalHex : ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57'];
+  const img = ctx.createImageData(size,size), data=img.data;
+  for (let y=0;y<size;y++){
+    for (let x=0;x<size;x++){
+      let min=1e20, id=0;
+      for(let i=0;i<sites.length;i++){ const dx=x-sites[i].x, dy=y-sites[i].y; const d=dx*dx+dy*dy; if(d<min){min=d; id=i;} }
+      const rgb = hexToRgb01(colors[id % colors.length]);
+      const p=(y*size+x)*4; data[p]=rgb[0]*255|0; data[p+1]=rgb[1]*255|0; data[p+2]=rgb[2]*255|0; data[p+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+  return await createImageBitmap(c);
+}
+async function generateUniformWavesTexture() {
+  const size = +document.getElementById('texSize').value || 1024;
+  const spacing = readInt('waveSpacing', 100);
+  const thickness = readInt('waveThick', 6);
+  const shape = readStr('waveShape','wave');
+  const c = document.createElement('canvas'); c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0f1117'; ctx.fillRect(0,0,size,size);
+  const colors = lastPalHex.length ? lastPalHex : ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57'];
+  let idx=0;
+  for (let y=0;y<size+spacing;y+=spacing){
+    for (let x=0;x<size+spacing;x+=spacing){
+      ctx.save(); ctx.translate(x,y); ctx.rotate(Math.random()*Math.PI*2);
+      ctx.strokeStyle = colors[idx % colors.length]; ctx.lineWidth = thickness; ctx.lineCap='round';
+      if (shape==='wave'){
+        ctx.beginPath();
+        for (let i=0;i<=20;i++){ const t=i/20, wx=(t-.5)*60, wy=Math.sin(t*6.28318)*15; if(i===0) ctx.moveTo(wx,wy); else ctx.lineTo(wx,wy); }
+        ctx.stroke();
+      } else { ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.stroke(); }
+      ctx.restore(); idx++;
+    }
+  }
+  return await createImageBitmap(c);
+}
+
+/* === APPLY PIPELINE: map generated texture to the CURRENT TARGET === */
+function applyTessellationTextureToTarget(texture, type){
+  // Ensure shader path uses texture for that target by setting dropdowns
+  if (currentTessTarget==='main'){
+    texMain = initGLTextureFromBitmap(texture);
+    document.getElementById('mainObjMapping').value = type;
+  } else if (currentTessTarget==='bgObj'){
+    texBgObj = initGLTextureFromBitmap(texture);
+    document.getElementById('bgObjMapping').value = type;
+  } else {
+    texBgPlane = initGLTextureFromBitmap(texture);
+    document.getElementById('bgPlaneMapping').value = type;
+  }
+  // make sure textures are sampled
+  document.getElementById('useTex').checked = true;
+}
+
+/* create/bind a WebGL texture from ImageBitmap (repeat+mips) */
+function initGLTextureFromBitmap(bitmap){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  return t;
+}
+
+/* Buttons: APPLY => generate -> apply to CURRENT TARGET */
+document.getElementById('applyDrawpad').addEventListener('click', async () => {
+  const bmp = await generateDrawpadTexture();
+  applyTessellationTextureToTarget(bmp, 'drawpad');
+  tessPanel.classList.remove('visible');
+  statusEl.textContent = `Applied Drawpad to ${currentTessTarget}`;
+});
+document.getElementById('applyPileCurved').addEventListener('click', async () => {
+  const bmp = await generatePileCurvedTexture();
+  applyTessellationTextureToTarget(bmp, 'pile_curved');
+  tessPanel.classList.remove('visible');
+  statusEl.textContent = `Applied Pile Curved to ${currentTessTarget}`;
+});
+document.getElementById('applyUniformWaves').addEventListener('click', async () => {
+  const bmp = await generateUniformWavesTexture();
+  applyTessellationTextureToTarget(bmp, 'uniform_waves');
+  tessPanel.classList.remove('visible');
+  statusEl.textContent = `Applied Uniform Waves to ${currentTessTarget}`;
+});
+
+/* Panel numeric readouts */
+['pileCount','pileRelax','pileJitter','pileSmooth','pileAlpha','waveSpacing','waveJitter','waveLength','waveAmp','waveThick']
+.forEach(id=>{ const vEl=document.getElementById(id+'V'); const el=document.getElementById(id); if(vEl&&el){ vEl.textContent=el.value; el.addEventListener('input',e=>vEl.textContent=e.target.value); } });
+
+/* init */
+window.addEventListener('load', ()=> setPalette(+document.getElementById('hue').value));
 </script>
 </body>
 </html>
